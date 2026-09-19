@@ -23,6 +23,15 @@ const depthColor: Record<DepthKind, string> = {
   Expanded: "#10b981",
 };
 
+// Short, single-line variants of coverageLabel() just for this row — the
+// full labels ("Frequently Covered", "Revisited Across Lectures") wrap onto
+// two lines next to the topic name at this width.
+function shortCoverageLabel(score: number): string {
+  if (score >= 0.7) return "Frequent";
+  if (score >= 0.4) return "Revisited";
+  return "New";
+}
+
 export default function TopicTimelineView({ topics, lectures }: Props) {
   const sortedLectures = React.useMemo(
     () =>
@@ -138,10 +147,14 @@ function TopicRow({
   return (
     <>
       <div className="flex flex-col justify-center gap-1 pr-2 py-3 border-t border-border">
-        <div className="flex items-center gap-2">
-          <div className="font-medium text-sm truncate">{topic.canonical_name}</div>
-          <Badge variant="outline" className={cn("text-[10px] border py-0 h-4", coverageBadge(topic.coverage_score))}>
-            {coverageLabel(topic.coverage_score)}
+        <div className="flex items-center gap-1.5 min-w-0">
+          <div className="font-medium text-sm truncate min-w-0">{topic.canonical_name}</div>
+          <Badge
+            variant="outline"
+            className={cn("text-[10px] border py-0 px-1.5 h-4 shrink-0 whitespace-nowrap leading-4", coverageBadge(topic.coverage_score))}
+            title={coverageLabel(topic.coverage_score)}
+          >
+            {shortCoverageLabel(topic.coverage_score)}
           </Badge>
         </div>
         <div className="text-[11px] text-muted-foreground">

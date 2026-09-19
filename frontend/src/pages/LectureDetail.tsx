@@ -1,5 +1,6 @@
 import * as React from "react";
 import { Link, useParams } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft, BookMarked, Sparkles, Clock, CheckCircle2, Loader2,
   FileText, Lightbulb, GitBranch, MessageSquare, Quote, AlertCircle,
@@ -28,6 +29,21 @@ export default function LectureDetail() {
   const retryMut = useRetryLectureProcessing();
 
   const status = liveStatus.data || lecture?.latest_job;
+
+  // Polling stops once the job finishes, but `lecture`/`notes` were fetched
+  // before that — refetch them once so the page leaves the processing view
+  // without needing a manual refresh.
+  const qc = useQueryClient();
+  const prevStatusRef = React.useRef<string | undefined>(undefined);
+  React.useEffect(() => {
+    const s = liveStatus.data?.status;
+    if (s && s !== prevStatusRef.current && (s === "completed" || s === "failed")) {
+      qc.invalidateQueries({ queryKey: ["lecture", lectureId] });
+      qc.invalidateQueries({ queryKey: ["lecture-notes", lectureId] });
+      qc.invalidateQueries({ queryKey: ["topics", lecture?.course_id] });
+    }
+    prevStatusRef.current = s;
+  }, [liveStatus.data?.status, qc, lectureId, lecture?.course_id]);
 
   if (loadingLecture || !lecture) {
     return <div className="flex items-center justify-center py-24"><Spinner /></div>;
