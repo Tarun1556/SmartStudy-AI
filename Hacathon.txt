@@ -1,0 +1,1177 @@
+You are the lead software architect, senior full-stack engineer,
+AI engineer and product designer for this hackathon project.
+
+The attached SRS is the primary product specification and source
+of truth.
+
+Your job is to build a complete, polished, deployable MVP based
+on that SRS.
+
+===========================================================
+PROJECT GOAL
+===========================================================
+
+Build an AI-powered web application that transforms scattered
+semester lecture material into a structured, evidence-backed
+study system.
+
+The application must support:
+
+- audio/video lecture uploads
+- transcript input
+- PDF/PPTX upload
+- text extraction
+- speech-to-text
+- structured lecture notes
+- topic extraction
+- cross-lecture topic merging
+- frequency/coverage analysis
+- searchable archive
+- PDF study-guide export
+
+The application should also include selected stretch features
+that create strong differentiation:
+
+1. Semester Knowledge Map
+2. Evidence-backed notes
+3. Topic Coverage Timeline
+4. Grounded "Ask Your Notes" Q&A
+5. Auto-generated practice questions / flashcards
+
+Do NOT turn this into a generic AI chatbot.
+
+The core product identity is:
+
+SCATTERED LECTURE MATERIAL
+        ↓
+UNDERSTANDING
+        ↓
+CROSS-LECTURE CONNECTIONS
+        ↓
+EVIDENCE-BACKED KNOWLEDGE
+        ↓
+PERSONALIZED STUDY GUIDE
+
+===========================================================
+PRODUCT POSITIONING
+===========================================================
+
+The application is a general student product and should NOT
+assume a specific college.
+
+Students from different colleges, departments and domains can
+use it.
+
+Implement user accounts so each student's courses, lectures,
+notes and study history are private.
+
+However, the public landing page MUST provide:
+
+"Try Demo"
+
+This opens a pre-seeded read-only demo workspace containing
+5-6 processed lectures.
+
+The judge should be able to experience the product without
+creating an account.
+
+Actual user uploads and personal data require authentication.
+
+Do NOT implement college-specific SSO, college IDs, sections,
+branches or institutional administration in the MVP.
+
+===========================================================
+TECH STACK
+===========================================================
+
+Frontend:
+- React
+- Vite
+- TypeScript
+- Tailwind CSS
+- shadcn/ui where useful
+- Lucide icons
+- React Router
+- TanStack Query for server-state management
+- React Hook Form + Zod for forms
+
+Backend:
+- Python
+- FastAPI
+- Pydantic
+- SQLAlchemy 2.x
+- Alembic
+- JWT authentication
+- secure password hashing
+
+Database:
+- PostgreSQL
+
+AI / Search:
+- LLM provider abstraction
+- sentence-transformers for embeddings
+- pgvector for vector storage/search
+- PostgreSQL full-text search for keyword search
+- hybrid search combining semantic + keyword retrieval
+
+Processing:
+- PyMuPDF for PDF extraction
+- python-pptx for PPTX extraction
+- Whisper/faster-whisper or configurable transcription provider
+- chunking + map-reduce summarization for long lectures
+
+PDF:
+- WeasyPrint if Docker setup is reliable
+- otherwise ReportLab
+
+Deployment:
+- Docker
+- docker-compose for local development
+- production-ready Dockerfile
+
+===========================================================
+IMPORTANT ARCHITECTURAL PRINCIPLE
+===========================================================
+
+Keep the architecture simple.
+
+Do NOT introduce:
+
+- microservices
+- Kubernetes
+- Kafka
+- Celery
+- Redis
+- unnecessary message brokers
+- separate vector database
+- unnecessary infrastructure
+
+This is a 12-hour hackathon.
+
+Prefer:
+
+React
+  ↓
+FastAPI
+  ↓
+Service layer
+  ↓
+SQLAlchemy
+  ↓
+PostgreSQL + pgvector
+
+Use FastAPI BackgroundTasks for asynchronous processing where
+appropriate.
+
+The processing pipeline must expose a job status so the frontend
+can display:
+
+queued
+processing
+completed
+failed
+
+===========================================================
+REPOSITORY STRUCTURE
+===========================================================
+
+Create a clean monorepo:
+
+/
+
+├── frontend/
+│   ├── src/
+│   │   ├── app/
+│   │   ├── components/
+│   │   │   ├── ui/
+│   │   │   ├── layout/
+│   │   │   ├── charts/
+│   │   │   └── common/
+│   │   ├── features/
+│   │   │   ├── auth/
+│   │   │   ├── dashboard/
+│   │   │   ├── courses/
+│   │   │   ├── lectures/
+│   │   │   ├── upload/
+│   │   │   ├── study-guide/
+│   │   │   ├── knowledge-map/
+│   │   │   ├── search/
+│   │   │   ├── ask/
+│   │   │   └── quiz/
+│   │   ├── hooks/
+│   │   ├── lib/
+│   │   │   ├── api/
+│   │   │   ├── utils/
+│   │   │   └── validation/
+│   │   ├── pages/
+│   │   ├── routes/
+│   │   ├── types/
+│   │   └── main.tsx
+│   ├── package.json
+│   └── Dockerfile
+│
+├── backend/
+│   ├── app/
+│   │   ├── main.py
+│   │   ├── core/
+│   │   │   ├── config.py
+│   │   │   ├── security.py
+│   │   │   └── logging.py
+│   │   ├── db/
+│   │   │   ├── session.py
+│   │   │   └── base.py
+│   │   ├── models/
+│   │   ├── schemas/
+│   │   ├── api/
+│   │   │   └── routes/
+│   │   ├── services/
+│   │   │   ├── ingestion/
+│   │   │   ├── extraction/
+│   │   │   ├── transcription/
+│   │   │   ├── llm/
+│   │   │   ├── embeddings/
+│   │   │   ├── search/
+│   │   │   ├── topics/
+│   │   │   ├── study_guide/
+│   │   │   ├── quiz/
+│   │   │   └── pdf/
+│   │   ├── tasks/
+│   │   └── utils/
+│   ├── tests/
+│   ├── alembic/
+│   ├── requirements.txt
+│   └── Dockerfile
+│
+├── data/
+│   └── demo/
+│
+├── scripts/
+│
+├── docs/
+│
+├── docker-compose.yml
+├── .env.example
+├── .gitignore
+└── README.md
+
+Keep modules reasonably small.
+Do not create giant files.
+
+===========================================================
+DATABASE DESIGN
+===========================================================
+
+Use PostgreSQL with SQLAlchemy.
+
+Create approximately these core entities:
+
+users
+courses
+lectures
+lecture_assets
+processing_jobs
+transcript_segments
+lecture_notes
+topics
+topic_mentions
+study_guides
+search_documents
+quizzes
+quiz_questions
+chat_sessions
+chat_messages
+
+Important relationships:
+
+User
+ └── Courses
+      └── Lectures
+           ├── Assets
+           ├── Transcript Segments
+           ├── Lecture Notes
+           └── Topic Mentions
+
+Topics should be canonical concepts within a course.
+
+Store topic embeddings using pgvector.
+
+Store flexible AI-generated structures using PostgreSQL JSONB
+where appropriate.
+
+Do not put everything into JSONB.
+Keep important relational entities normalized.
+
+Every user-owned entity must have an ownership relationship
+that can be validated in the backend.
+
+Never trust user_id values supplied by the frontend.
+
+Derive authenticated user identity from the authentication
+context.
+
+===========================================================
+AUTHENTICATION
+===========================================================
+
+Implement:
+
+- registration
+- login
+- logout
+- current-user endpoint
+- password hashing
+- JWT authentication
+- protected endpoints
+
+Keep authentication simple.
+
+Do not implement:
+- college SSO
+- email verification
+- social login
+- complex role systems
+
+unless explicitly required by the SRS.
+
+Add a seeded demo workspace that is read-only and accessible
+through "Try Demo".
+
+===========================================================
+LECTURE INGESTION PIPELINE
+===========================================================
+
+A lecture may contain:
+
+1. audio/video
+2. PDF
+3. PPTX
+4. pasted transcript
+
+Create an ingestion pipeline:
+
+UPLOAD
+ ↓
+VALIDATE
+ ↓
+EXTRACT / TRANSCRIBE
+ ↓
+NORMALIZE TEXT
+ ↓
+CHUNK
+ ↓
+GENERATE STRUCTURED NOTES
+ ↓
+EXTRACT TOPICS
+ ↓
+GENERATE EMBEDDINGS
+ ↓
+MERGE WITH EXISTING COURSE TOPICS
+ ↓
+UPDATE STUDY GUIDE
+ ↓
+INDEX FOR SEARCH
+
+Long transcripts MUST use chunking / map-reduce rather than
+sending the entire lecture directly to the LLM.
+
+Every processing operation must produce a visible status.
+
+===========================================================
+STRUCTURED NOTE GENERATION
+===========================================================
+
+The LLM must return structured data.
+
+For each lecture generate:
+
+- title
+- overview
+- headings
+- key ideas
+- definitions
+- examples
+- important relationships
+- extracted topics
+- source references
+
+Do not store unstructured LLM prose as the entire system state.
+
+Use structured JSON validated by Pydantic.
+
+===========================================================
+TOPIC INTELLIGENCE
+===========================================================
+
+This is the heart of the application.
+
+For every lecture:
+
+1. extract candidate topics
+2. normalize topic names
+3. generate embeddings
+4. compare against existing course topics
+5. merge semantically similar concepts
+6. create a canonical topic label
+7. create topic mentions
+8. preserve source evidence
+
+Example:
+
+"BST"
+"Binary Search Tree"
+"Binary Search Trees"
+
+should resolve into one concept where appropriate.
+
+Do not rely only on exact string matching.
+
+Use embeddings + similarity threshold.
+
+Allow threshold to be configured through settings.
+
+===========================================================
+COVERAGE SCORE
+===========================================================
+
+Do NOT claim:
+
+"This topic will appear on the exam."
+
+Instead use transparent language:
+
+- Frequently Covered
+- Revisited Across Lectures
+- High Course Coverage
+
+Calculate a simple explainable coverage score from factors
+such as:
+
+- number of distinct lectures mentioning the topic
+- number of source types containing the topic
+- recurrence across the lecture sequence
+- number of supporting evidence segments
+
+Expose the underlying evidence.
+
+===========================================================
+STANDOUT FEATURE #1
+SEMESTER KNOWLEDGE MAP
+===========================================================
+
+Create a visual knowledge map.
+
+Each canonical topic is a node.
+
+Node size can represent coverage.
+
+Connections represent related or co-occurring concepts.
+
+Clicking a node should open:
+
+- canonical topic name
+- coverage count
+- lectures containing it
+- source snippets
+- timestamps where available
+- related topics
+- generated explanation
+
+Keep the visualization readable.
+Do NOT create a technically impressive but unusable graph.
+
+===========================================================
+STANDOUT FEATURE #2
+TOPIC COVERAGE TIMELINE
+===========================================================
+
+For each important topic show:
+
+First introduced
+↓
+Revisited
+↓
+Expanded
+↓
+Repeated
+
+Example:
+
+Binary Search Tree
+
+L2  ● Introduced
+L3
+L4  ● Implementation
+L5  ● Complexity
+L6  ● Variants
+
+This is one of the main visual differentiators.
+
+===========================================================
+STANDOUT FEATURE #3
+EVIDENCE-BACKED NOTES
+===========================================================
+
+Every important AI-generated note or topic should have a
+"View Evidence" action.
+
+Show:
+
+lecture
+timestamp if available
+source type
+supporting text
+
+Never present AI-generated claims as unsupported facts.
+
+===========================================================
+STANDOUT FEATURE #4
+ASK YOUR NOTES
+===========================================================
+
+Implement a grounded Q&A interface.
+
+Pipeline:
+
+User Question
+ ↓
+Hybrid Retrieval
+ ↓
+Top relevant lecture chunks
+ ↓
+LLM
+ ↓
+Answer + citations
+
+The LLM must be instructed:
+
+- answer only from retrieved student material
+- do not invent content
+- cite source lectures
+- cite timestamps when available
+- clearly say when the answer is not present in the uploaded material
+
+The UI should display citations as clickable source references.
+
+===========================================================
+SEARCH
+===========================================================
+
+Implement two search modes:
+
+1. Keyword search
+2. Meaning-based search
+
+Preferred final experience:
+
+Hybrid Search
+
+Combine:
+
+PostgreSQL full-text relevance
++
+pgvector semantic similarity
+
+Return:
+
+- lecture
+- topic
+- note section
+- matching snippet
+- relevance score
+- source reference
+
+Search result should link directly to the source lecture/note.
+
+===========================================================
+STUDY GUIDE
+===========================================================
+
+The main study-guide page should display:
+
+- top recurring concepts
+- coverage count
+- topic summaries
+- source lectures
+- evidence
+- related topics
+
+Allow the user to:
+
+- filter by course
+- filter by coverage
+- open evidence
+- search within the guide
+- export PDF
+- generate practice questions
+
+Do not present frequency as guaranteed exam probability.
+
+===========================================================
+PRACTICE MODE
+===========================================================
+
+Implement as a high-priority stretch feature if core features
+are stable.
+
+Generate:
+
+- MCQs
+- short-answer questions
+- flashcards
+
+Questions must be generated strictly from the student's
+uploaded content.
+
+Show source lecture for every question.
+
+Add a simple score.
+
+===========================================================
+UI / UX REQUIREMENTS
+===========================================================
+
+The frontend is extremely important.
+
+The application must feel like a polished modern education
+product, not a developer dashboard.
+
+Design principles:
+
+- minimal
+- clean
+- calm
+- information-dense without being cluttered
+- responsive
+- accessible
+- obvious primary actions
+- excellent empty states
+- excellent loading states
+- excellent error states
+
+Use:
+
+- Tailwind CSS
+- shadcn/ui
+- Lucide icons
+- subtle transitions
+- consistent spacing
+- consistent typography
+- restrained color palette
+
+Avoid:
+
+- excessive gradients
+- excessive animations
+- huge walls of text
+- unnecessary cards everywhere
+- generic AI robot imagery
+- flashy effects with no purpose
+
+===========================================================
+PRIMARY SCREENS
+===========================================================
+
+1. LANDING PAGE
+
+Hero:
+
+"Turn a semester of lectures into one intelligent study guide."
+
+Show:
+
+- value proposition
+- Try Demo
+- Create Workspace
+- Supported formats
+- 3-step explanation
+
+2. DASHBOARD
+
+Show:
+
+- Courses
+- Lectures processed
+- Topics discovered
+- Frequently covered topics
+- Study progress
+- Recent processing jobs
+
+3. COURSE PAGE
+
+Show:
+
+- course overview
+- lecture timeline
+- coverage summary
+- topic map
+- recent lectures
+
+4. UPLOAD PAGE
+
+Support drag-and-drop.
+
+Display:
+
+- file name
+- file type
+- course
+- lecture number/date
+- processing status
+
+Show progress:
+
+Uploading
+Extracting
+Transcribing
+Analyzing
+Finding topics
+Updating study guide
+
+5. LECTURE DETAIL
+
+Three-column experience where appropriate:
+
+Left:
+lecture metadata / navigation
+
+Center:
+structured notes
+
+Right:
+evidence / source references / topic list
+
+6. STUDY GUIDE
+
+Show:
+
+- recurring concepts
+- coverage badges
+- topic cards
+- evidence
+- knowledge map
+- timeline
+
+7. SEARCH
+
+Provide:
+
+- search box
+- keyword / meaning / hybrid mode
+- result snippets
+- source navigation
+
+8. ASK YOUR NOTES
+
+Chat interface with:
+
+- citations
+- source cards
+- related topics
+- "not found in your material" state
+
+9. PRACTICE MODE
+
+Focused revision UI:
+
+question
+answers
+explanation
+source
+progress
+
+===========================================================
+DEMO EXPERIENCE
+===========================================================
+
+The first-time experience MUST be optimized for a hackathon judge.
+
+A judge should be able to:
+
+Landing page
+ ↓
+Try Demo
+ ↓
+Demo Course
+ ↓
+5-6 lectures already processed
+ ↓
+Study Guide
+ ↓
+Click recurring topic
+ ↓
+See cross-lecture evidence
+ ↓
+Knowledge Map
+ ↓
+Ask Your Notes
+ ↓
+Search
+ ↓
+Export PDF
+
+Then demonstrate live upload of one prepared short lecture.
+
+Prepare seeded demo content.
+
+===========================================================
+AI PROVIDER ARCHITECTURE
+===========================================================
+
+Do not hard-code the system to one LLM vendor.
+
+Create an LLM service interface.
+
+Example:
+
+LLMProvider
+ ├── AnthropicProvider
+ ├── GeminiProvider
+ ├── OpenAIProvider
+ └── MockProvider
+
+Provider selected through environment configuration.
+
+IMPORTANT:
+Do not assume a Claude Pro consumer subscription automatically
+provides API credits or API access.
+
+The deployed application must use a separately configured
+API credential when using a hosted LLM.
+
+Implement a MockProvider for development/demo fallback.
+
+The fallback MUST NOT secretly pretend to be a real LLM.
+
+Clearly keep provider selection configurable.
+
+===========================================================
+FAILURE HANDLING
+===========================================================
+
+AI APIs can fail.
+
+The application must not collapse.
+
+Implement graceful states for:
+
+- LLM failure
+- transcription failure
+- malformed AI response
+- unsupported file
+- large file
+- database error
+- processing timeout
+
+For AI JSON:
+
+1. validate response
+2. retry once with repair prompt if needed
+3. reject invalid result safely
+4. expose a useful UI error
+
+===========================================================
+FILE STORAGE
+===========================================================
+
+Do not store large audio/video binaries inside PostgreSQL.
+
+Create a storage abstraction.
+
+Development/demo:
+local filesystem
+
+Optional production adapter:
+S3-compatible/object storage
+
+Use environment configuration.
+
+===========================================================
+SECURITY
+===========================================================
+
+Implement:
+
+- environment variables for secrets
+- password hashing
+- authenticated API routes
+- ownership checks
+- input validation
+- file-type validation
+- upload size limits
+- safe filenames
+- no secrets in Git
+- CORS configuration
+- centralized exception handling
+
+Do not trust client-provided ownership IDs.
+
+===========================================================
+API DESIGN
+===========================================================
+
+Create clean REST endpoints approximately covering:
+
+AUTH
+POST /api/auth/register
+POST /api/auth/login
+POST /api/auth/logout
+GET  /api/auth/me
+
+COURSES
+GET    /api/courses
+POST   /api/courses
+GET    /api/courses/{id}
+PUT    /api/courses/{id}
+DELETE /api/courses/{id}
+
+LECTURES
+POST /api/lectures/upload
+GET  /api/lectures
+GET  /api/lectures/{id}
+GET  /api/lectures/{id}/status
+
+TOPICS
+GET /api/courses/{id}/topics
+GET /api/topics/{id}
+GET /api/topics/{id}/timeline
+GET /api/topics/{id}/evidence
+
+STUDY GUIDE
+GET  /api/courses/{id}/study-guide
+POST /api/courses/{id}/study-guide/regenerate
+GET  /api/courses/{id}/study-guide/pdf
+
+SEARCH
+GET /api/search
+
+ASK
+POST /api/ask
+
+QUIZ
+POST /api/quiz/generate
+GET  /api/quiz/{id}
+
+DEMO
+GET /api/demo/course
+
+Use proper status codes.
+Use Pydantic schemas.
+Do not return database models directly.
+
+===========================================================
+DOCKER
+===========================================================
+
+Provide:
+
+docker-compose.yml
+
+Services for:
+
+frontend
+backend
+postgres
+
+Prefer PostgreSQL with pgvector enabled.
+
+Make local startup as close to one command as possible:
+
+docker compose up --build
+
+Provide .env.example.
+
+Make the application deployable without manually changing
+source code.
+
+===========================================================
+TESTING
+===========================================================
+
+At minimum create tests for:
+
+- authentication
+- course creation
+- ownership checks
+- lecture creation
+- topic merge logic
+- search
+- AI response validation
+- study guide generation
+
+Add one end-to-end happy-path test:
+
+register
+ ↓
+create course
+ ↓
+upload/paste transcript
+ ↓
+process
+ ↓
+generate notes
+ ↓
+extract topics
+ ↓
+study guide
+ ↓
+search
+ ↓
+ask question
+
+===========================================================
+CODE QUALITY
+===========================================================
+
+Follow:
+
+- type hints
+- clear naming
+- small functions
+- service-layer separation
+- reusable React components
+- reusable API client
+- centralized configuration
+- centralized error handling
+- no duplicated logic
+- no hardcoded secrets
+
+Write comments only where they explain non-obvious logic.
+
+Do not generate unnecessary abstractions.
+
+===========================================================
+IMPLEMENTATION PRIORITY
+===========================================================
+
+P0 — MUST WORK
+
+1. Authentication
+2. Courses
+3. Lecture upload / transcript input
+4. PDF/PPTX extraction
+5. Transcription interface
+6. AI structured notes
+7. Topic extraction
+8. Cross-lecture merging
+9. Coverage/frequency
+10. Study guide
+11. Search
+12. PDF export
+13. Demo workspace
+14. High-quality UI
+
+P1 — STANDOUT
+
+15. Evidence-backed notes
+16. Coverage timeline
+17. Knowledge map
+18. Ask Your Notes with citations
+19. Hybrid search
+
+P2 — IF TIME REMAINS
+
+20. Quiz
+21. Flashcards
+22. Study progress
+23. Additional visualizations
+
+Do NOT sacrifice P0 stability for P2 features.
+
+===========================================================
+12-HOUR HACKATHON RULE
+===========================================================
+
+Optimize for:
+
+COMPLETENESS > NUMBER OF FEATURES
+
+A complete vertical workflow is more valuable than many
+half-working features.
+
+The core journey must work:
+
+upload
+ ↓
+process
+ ↓
+notes
+ ↓
+topics
+ ↓
+merge
+ ↓
+study guide
+ ↓
+search
+ ↓
+evidence
+ ↓
+ask
+ ↓
+export
+
+===========================================================
+EXECUTION BEHAVIOR
+===========================================================
+
+Before coding:
+
+1. Read the entire SRS.
+2. Inspect the repository.
+3. Produce a concise architecture plan.
+4. Identify ambiguities.
+5. Resolve ambiguities using the simplest decision consistent
+   with the SRS.
+6. Implement incrementally.
+
+Do NOT repeatedly ask for confirmation for trivial engineering
+decisions.
+
+After each major milestone:
+
+- run the project
+- run tests
+- inspect errors
+- fix them
+- continue
+
+Never claim that something works without verifying it.
+
+If a feature becomes too risky for the 12-hour constraint,
+protect the P0 workflow and simplify the risky feature.
+
+===========================================================
+FINAL DEFINITION OF DONE
+===========================================================
+
+The finished application must:
+
+- run locally with Docker
+- have clean React UI
+- have FastAPI backend
+- use PostgreSQL
+- use SQLAlchemy
+- support authenticated private workspaces
+- support no-login demo mode
+- process lecture material
+- generate structured notes
+- merge recurring topics
+- show coverage
+- provide evidence/source references
+- support search
+- support grounded Q&A
+- export a polished PDF
+- contain the standout knowledge-map/timeline experience
+  if implementation remains stable
+- have a clean README
+- have .env.example
+- have basic tests
+- be deployable
+
+Most importantly:
+
+THE APPLICATION MUST FEEL LIKE A REAL PRODUCT,
+NOT A COLLECTION OF AI FEATURES.
+
+The judge should understand the value within 30 seconds.
+The complete demo should be possible within 3 minutes.

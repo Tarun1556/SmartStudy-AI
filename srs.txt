@@ -1,0 +1,150 @@
+AI Lecture Notes Summarizer & Study Guide Builder: Hackathon Project Brief
+1. Problem Context
+Students collect lecture material all semester in scattered forms: recordings, slide decks, handwritten
+notes, and shared drives. By exam time, they must re-watch hours of video or skim dozens of slides
+to find what matters, and they often can't tell which topics the professor kept returning to. Existing
+tools either transcribe a single lecture or summarize a single document. Few connect material across
+a whole semester or point out which themes recur, so students end up re-reading everything instead
+of studying efficiently.
+2. Objective
+Build a web app where a student uploads lecture recordings and slide decks over a semester, and the
+AI turns them into clean structured notes per lecture. It then merges recurring themes into one study
+guide that highlights the most frequently covered topics, with PDF export and a searchable archive.
+3. Core Features (Must-Have)
+• Upload and organize: Upload audio/video files (or paste a transcript) and slide decks
+(PDF/PPTX), tagged with a course name and lecture number or date.
+• Transcription and text extraction: Convert speech to text, and pull text out of slides, so every
+upload becomes plain text the AI can work with.
+• Structured notes per lecture: The AI produces notes with a title, headings, bullet-point key
+ideas, definitions, and examples.
+• Topic extraction: For each lecture, the AI outputs a list of main topics/concepts as structured
+data (e.g., a JSON list), which the merging step relies on.
+• Cross-lecture merged study guide: Similar topics from different lectures are grouped into
+one section, so a topic like "Binary Search Trees" combines what was said in lectures 3, 5,
+and 9.
+• Frequency highlighting: Each topic shows how many lectures mention it (e.g., "Appears in 6
+of 12 lectures"), and the most frequent ones are flagged as "likely important."
+• PDF export and searchable archive: Download the study guide as a PDF, and search across
+all saved notes by keyword, with results linking back to the source lecture.
+4. Stretch Features (Good-to-Have)
+• Auto-generated practice questions: Create flashcards or quiz questions from the top topics,
+so the guide doubles as a revision tool.
+• Timestamp links: Each note points to the exact moment in the recording where the topic
+was discussed.
+• Semantic ("meaning-based") search: Find notes by concept, not just exact words. Searching
+"how databases stay consistent" would find notes about ACID properties.
+• "Ask your notes" chat: A small Q&A box that answers questions using only the student's
+uploaded material, with citations to lectures.
+
+5. Suggested Tech Stack
+Layer Recommendation Why
+Frontend
+React (with Vite) and Tailwind CSS,
+or Streamlit if the team wants
+speed
+React is widely known and flexible. Streamlit
+lets a Python-only team build a working UI in
+hours.
+Backend Python FastAPI
+Easy to learn, auto-generates API docs, and
+Python has the best libraries for AI and file
+processing.
+Speech-to-text
+OpenAI Whisper (via API, or the
+open-source faster-whisper library
+locally)
+Accurate on lectures, handles accents well, and
+works with a few lines of code.
+Slide/PDF text
+extraction
+PyMuPDF (PDFs) and python-pptx
+(PowerPoint)
+Simple libraries that pull text out of slides page
+by page.
+AI for notes and
+topics
+A hosted LLM API (Claude, Gemini,
+or GPT)
+Handles summarization and structured JSON
+output with no model training.
+Merging similar
+topics
+sentence-transformers (e.g., allMiniLM-L6-v2)
+Turns topic names into numbers
+("embeddings") so similar meanings can be
+grouped, e.g., "BST" and "binary search tree".
+Database and
+search
+SQLite with FTS5 full-text search
+(or PostgreSQL if the team prefers)
+SQLite needs no setup and FTS5 gives fast
+keyword search out of the box.
+PDF export
+WeasyPrint (HTML to PDF) or
+ReportLab
+Design the study guide as HTML/CSS you
+already know, then convert it.
+Background
+jobs (optional) FastAPI BackgroundTasks Lets transcription run without freezing the
+page.
+6. Suggested Approach / Step-by-Step Plan
+1. Set up and split roles (Hour 0–2): Create the repo, choose the stack, get API keys, and assign
+roles (e.g., frontend, backend, AI pipeline, demo/data).
+2. Build the text-ingestion pipeline: Write functions that take a slide deck or a recording and
+return plain text. Test with one short PDF and one short audio clip first.
+3. Generate notes for one lecture: Craft a prompt that turns a transcript into structured notes
+plus a JSON list of topics. Get this working well on a single lecture before anything else, as
+the whole project depends on it.
+4. Handle long lectures: Split long transcripts into chunks (e.g., 10 minutes each), summarize
+each chunk, then combine the chunk summaries into the final lecture notes.
+5. Set up the database and upload flow: Store courses, lectures, transcripts, notes, and topics.
+Build the upload page and connect it to the pipeline.
+
+6. Merge topics across lectures: Convert each topic to an embedding, group topics whose
+similarity is above a threshold, and pick a clean label for each group. Count how many
+distinct lectures each group appears in.
+7. Build the study guide view: Display merged topics sorted by frequency, with a badge for the
+most common ones and links back to the source lectures.
+8. Add search and PDF export: Turn on full-text search over notes, then generate the study
+guide as HTML and convert it to PDF.
+9. Polish and prepare the demo (last 6–8 hours): Load a prepared set of 4–6 lectures, fix rough
+UI edges, add loading indicators and error messages, and rehearse.
+10. Buffer and stretch goals: Use leftover time for one stretch feature, such as practice
+questions.
+7. Sample Data / APIs to Use
+• MIT OpenCourseWare (ocw.mit.edu): Full courses with lecture videos, slide decks, and notes
+under open licenses. It is ideal for a realistic mini-semester (pick one course and use 5–6
+lectures).
+• CS50 lectures (Harvard): Freely available recordings and slides with a clear, structured
+teaching style.
+• YouTube lecture captions: The youtube-transcript-api Python library can fetch existing
+captions for many public lecture videos, letting you skip transcription while developing.
+• TED-LIUM corpus: A public speech dataset of TED talks with transcripts, useful for testing the
+transcription and summarization steps on spoken content.
+• Whisper API / open-source Whisper: For transcribing your own audio.
+• Mock data option: Record two or three 3–5 minute "mini lectures" yourselves on
+overlapping topics, or paste transcripts of existing lectures. Overlap is what lets you
+demonstrate cross-lecture merging.
+Tip: Check each source's license and only use material you're allowed to use for a demo.
+8. Key Challenges to Anticipate
+• Long lectures exceed what the AI can handle at once. Tip: Chunk the transcript, summarize
+each chunk, then summarize the summaries. This pattern is called "map-reduce"
+summarization.
+• The same topic gets different names across lectures (e.g., "hash table" vs. "hashing" vs.
+"dictionary structure"). Tip: Use embeddings plus a similarity threshold to group them, and
+tune the threshold on real sample data. Let the AI name each merged group.
+• Transcription is slow and uploads can be large. Tip: Use short clips for development, process
+files in the background with a progress indicator, and pre-process your demo lectures ahead
+of time.
+
+• "Appears most often" doesn't guarantee "will be on the exam", and the AI can make things
+up. Tip: Label results as "frequently covered" rather than promising exam relevance, and
+always show which lectures each note came from so students can verify.
+9. What a Good Demo Looks Like
+Start with a folder of five or six pre-loaded lectures from one course, then upload a fresh lecture live
+to show the pipeline turning it into clean, structured notes within a minute or two. Next, open the
+merged study guide and show a topic that combines content from several lectures, with a frequency
+badge like "Appears in 5 of 6 lectures," making the "most important topics" idea visible at a glance.
+Finish by searching a keyword to jump straight to matching notes and clicking "Export PDF" to
+download a polished study guide. Judges should walk away seeing the full journey: scattered
+material in, one usable revision document out.

@@ -1,0 +1,107 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 230 40% 6%;
+    --foreground: 210 40% 96%;
+    --card: 230 32% 10%;
+    --card-foreground: 210 35% 94%;
+    --popover: 230 32% 9%;
+    --popover-foreground: 210 35% 94%;
+    --primary: 258 90% 66%;
+    --primary-foreground: 240 60% 99%;
+    --secondary: 230 24% 15%;
+    --secondary-foreground: 210 30% 88%;
+    --muted: 230 24% 13%;
+    --muted-foreground: 220 15% 62%;
+    --accent: 258 45% 20%;
+    --accent-foreground: 192 95% 68%;
+    --destructive: 0 84% 63%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 230 22% 20%;
+    --input: 230 22% 20%;
+    --ring: 258 90% 66%;
+    --radius: 0.75rem;
+
+    --neon-cyan: 192 95% 55%;
+    --neon-violet: 258 90% 66%;
+    --neon-pink: 322 85% 62%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+      "Helvetica Neue", Arial, sans-serif;
+    background-image:
+      radial-gradient(circle at 15% 0%, hsl(var(--neon-violet) / 0.16), transparent 45%),
+      radial-gradient(circle at 85% 15%, hsl(var(--neon-cyan) / 0.12), transparent 40%);
+    background-attachment: fixed;
+  }
+  h1, h2, h3, h4, h5, h6 {
+    @apply tracking-tight;
+  }
+}
+
+.scrollbar-thin::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.scrollbar-thin::-webkit-scrollbar-thumb {
+  background-color: hsl(var(--border));
+  border-radius: 999px;
+}
+
+.fade-in {
+  animation: fadeIn 0.25s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, hsl(var(--neon-cyan)) 0%, hsl(var(--neon-violet)) 55%, hsl(var(--neon-pink)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.glass {
+  background: hsl(var(--card) / 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid hsl(var(--border) / 0.8);
+}
+
+.glow-ring {
+  box-shadow: 0 0 0 1px hsl(var(--primary) / 0.25), 0 0 24px -6px hsl(var(--primary) / 0.45);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 0 1px hsl(var(--neon-cyan) / 0.25), 0 0 24px -6px hsl(var(--neon-cyan) / 0.45);
+}
+
+.grid-bg {
+  position: relative;
+  isolation: isolate;
+}
+.grid-bg::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(hsl(var(--border) / 0.5) 1px, transparent 1px),
+    linear-gradient(90deg, hsl(var(--border) / 0.5) 1px, transparent 1px);
+  background-size: 44px 44px;
+  mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 60% at 50% 0%, black 40%, transparent 100%);
+}
