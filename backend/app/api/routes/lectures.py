@@ -270,6 +270,48 @@ def get_lecture_status(
     return ProcessingJobRead.model_validate(jobs[0])
 
 
+@router.post("/{lecture_id}/retry", response_model=ProcessingJobRead, status_code=status.HTTP_202_ACCEPTED)
+def retry_lecture_processing(
+    lecture_id: int,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Re-queue processing for a lecture whose latest job failed.
+
+    Matches the "allow retry, do not leave stuck in PROCESSING" requirement:
+    a failed job (including one failed by the startup stale-job sweep after a
+    server restart) is not a dead end — the user can retry from here instead
+    of re-uploading.
+    """
+    if current_user.is_demo:
+        raise HTTPException(status_code=403, detail="Demo mode is read-only")
+    lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
+    if not lecture:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+    _check_lecture_owner(db, lecture, current_user)
+
+    jobs = sorted(lecture.processing_jobs, key=lambda j: j.id, reverse=True)
+    latest = jobs[0] if jobs else None
+    if latest and latest.status in ("queued", "processing"):
+        raise HTTPException(status_code=409, detail="Processing is already in progress for this lecture")
+
+    job = ProcessingJob(
+        lecture_id=lecture.id,
+        job_type="full_processing",
+        status="queued",
+        current_step="Awaiting processing",
+        progress=0,
+    )
+    db.add(job)
+    lecture.status = "pending"
+    db.commit()
+    db.refresh(job)
+
+    background_tasks.add_task(process_lecture_job, job.id)
+    return ProcessingJobRead.model_validate(job)
+
+
 @router.get("/{lecture_id}/notes", response_model=LectureNoteRead)
 def get_lecture_notes(
     lecture_id: int,

@@ -39,6 +39,8 @@ On top of that knowledge base, StudyAI generates:
 - [Environment variables](#environment-variables)
 - [API surface](#api-surface)
 - [Testing](#testing)
+- [Performance & reliability](#performance--reliability)
+- [Design decisions](#design-decisions)
 - [How this is different from NotebookLM & similar tools](#how-this-is-different-from-notebooklm--similar-tools)
 
 ---
@@ -416,7 +418,7 @@ All routes are prefixed `/api` and (except `/auth/*`, `/demo/*`, `/health`) requ
 |---|---|
 | **Auth** | `POST /auth/register`, `POST /auth/login`, `POST /auth/logout`, `GET /auth/me` |
 | **Courses** | `GET/POST /courses`, `GET/PUT/DELETE /courses/{id}`, `GET /courses/{id}/stats` |
-| **Lectures** | `GET/POST /lectures`, `POST /lectures/upload`, `GET /lectures/{id}`, `GET /lectures/{id}/status`, `GET /lectures/{id}/notes` |
+| **Lectures** | `GET/POST /lectures`, `POST /lectures/upload`, `GET /lectures/{id}`, `GET /lectures/{id}/status`, `GET /lectures/{id}/notes`, `POST /lectures/{id}/retry` |
 | **Topics** | `GET /courses/{id}/topics`, `GET /topics/{id}`, `GET /topics/{id}/timeline`, `GET /topics/{id}/evidence`, `GET /courses/{id}/knowledge-map` |
 | **Search** | `GET /search?q=...` — semantic vector search across a course |
 | **Ask** | `POST /ask` — grounded Q&A with citations, `GET /ask/sessions/{course_id}`, `GET /ask/session/{id}` |
@@ -434,7 +436,46 @@ cd backend
 pytest --cov=app
 ```
 
-Covers auth, courses, lectures (upload → processing → notes), topics, search, and a full end-to-end flow (`test_e2e.py`).
+Covers auth, courses, lectures (upload → processing → notes), topics, search, a full end-to-end flow (`test_e2e.py`), retrieval building blocks (`test_embeddings_and_chunking.py`: cosine similarity edge cases, deterministic embeddings, chunking), and background-job reliability (`test_job_reliability.py`: stale-job sweep, retry endpoint, ownership/state checks). Tests run against SQLite by default (the `pgvector.Vector` column type is swapped for `JSON` at collection time in `conftest.py`), so no Postgres instance is required to run the suite — `search_hybrid`'s Postgres-only ANN branch is skipped in favor of its in-process fallback, and both paths are exercised by the same tests. Set `TEST_DATABASE_URL` to run against a real Postgres/pgvector instance instead.
+
+---
+
+## Performance & reliability
+
+This section documents what was actually profiled and changed, not a wishlist — see [`PERFORMANCE_PLAN.md`](./PERFORMANCE_PLAN.md) for the full bottleneck table this was worked from.
+
+**Retrieval (RAG core).** `search_hybrid`'s semantic branch used to pull up to 200 `SearchDocument` rows (full text + embedding) per query and score them with a Python loop — pgvector was installed but never actually used for the nearest-neighbor search. It now runs the similarity search inside Postgres with pgvector's `<=>` cosine-distance operator (`ORDER BY embedding <=> :q LIMIT k`), backed by an `HNSW` index created in `init_db()` on both `search_documents.embedding` and `topics.embedding`. HNSW was chosen over IVFFlat because it needs no `lists` parameter tuned to row count and behaves correctly from an empty table — relevant for a demo app that starts with zero rows. The SQLite test path (and any non-Postgres deployment) keeps the original in-process scoring loop as a fallback, so behavior is identical either way — only the Postgres path is now indexed.
+
+**N+1 queries removed.**
+- `POST /api/ask` re-queried `Lecture` once per retrieved chunk (up to 8 extra round trips per question) even though `search_hybrid` had already resolved it — now reuses the batched result.
+- `search_hybrid` had a module-level, never-invalidated `_lecture_cache` global dict that opened a **second** DB session per uncached lecture. Removed in favor of one `WHERE id IN (...)` batch query per search call, using the session already passed in.
+- `quiz.generate_quiz` queried `TopicMention` once per topic (up to 30 round trips for a 30-topic quiz) — now one batched query, grouped in Python.
+- `topics.get_topic_detail`, `topics.get_topic_evidence`, and `services.topics.get_topic_timeline` each queried `Lecture` once per mention/lecture in a loop — now batch-fetched.
+- `services.topics.recalculate_topic_stats` re-ran an identical "all lectures in this course" query and a `find_related_topics` topic-embedding scan **once per topic** — both are now fetched once and reused across the loop.
+
+**Background job reliability.** Processing runs via FastAPI `BackgroundTasks` in-process (see [Design decisions](#design-decisions) for why not Celery/Redis). If the process restarted mid-job, the `ProcessingJob` row was orphaned at `status="processing"` forever with no way to retry. On startup, a sweep now marks any job still `queued`/`processing` as `failed` with a clear, retryable message (nothing can legitimately still be running the instant the process starts, so this is always safe), and `POST /api/lectures/{id}/retry` re-queues a failed job. The raw exception text that used to be stored on a failed job (and returned to the client via `ProcessingJobRead`) is now replaced with a generic "Document processing failed. Please retry." message; the real exception and traceback still go to the server log via `logger.exception`.
+
+**Frontend UX bug fix.** The post-upload "Processing started" dialog's live progress bar never actually polled — `useLectureStatus(created?.job_id ? null : null, 1500)` in `Upload.tsx` always evaluated the ternary to `null`, so the query was permanently disabled and the dialog sat frozen at 0% for the entire processing duration even though the backend was actively working. Fixed to pass the real lecture id. A **Retry** button was also added to the failed-processing card in `LectureDetail.tsx`, wired to the new retry endpoint.
+
+**Observability.** Added a lightweight ASGI timing middleware (`app/main.py`) that logs `method path -> status (duration_ms)` for every request and sets an `X-Response-Time-Ms` response header — enough to compute P95s from the log without adding a monitoring stack. The RAG path (`ask.py`) logs `retrieval_ms` / `llm_ms` / `total_ms` per question, `search_hybrid` logs its own duration, and the background job (`processing.py`) logs a duration per pipeline phase (extract → notes → topics → reindex → study guide) plus a total, so a slow upload can be diagnosed from the log alone.
+
+**Error handling.** A catch-all exception handler on `app` now guarantees an unhandled exception returns `{"detail": "Internal error, please retry."}` instead of ever risking a raw traceback reaching the client, while still logging the full exception server-side. `HTTPException` responses (404/403/400/etc.) are unaffected.
+
+**What wasn't changed, and why** — see [Design decisions](#design-decisions) below.
+
+---
+
+## Design decisions
+
+**Why PostgreSQL + pgvector?** One database for both relational data (users, courses, topic graphs, quiz results) and vector similarity search, instead of running a separate vector store alongside Postgres. At this app's scale (a course's worth of lecture content, not a web-scale corpus), pgvector's `HNSW`/`IVFFlat` indexes are more than sufficient, and keeping embeddings in the same table as the content they describe means a single transaction can insert a `SearchDocument` and its embedding together — no dual-write consistency problem between two systems.
+
+**Why direct RAG instead of LangChain?** `app/services/llm` and `app/services/search` implement retrieval and generation directly (raw HTTP calls to OpenAI/Anthropic/Gemini behind a small `LLMProvider` interface, SQLAlchemy + pgvector for retrieval). For three providers and one retrieval path, that's less code and fewer moving parts to debug than a framework layer would add, and it's what made it straightforward to add a fully offline deterministic `MockProvider`/`MockEmbeddingProvider` fallback — the whole pipeline runs and is demoable with zero API keys, which is harder to guarantee through a heavier abstraction.
+
+**Why background processing (and not Celery/Redis)?** Lecture processing (extraction/transcription → LLM notes → topic extraction/merge → embedding → reindexing → study guide regen) can take anywhere from seconds to a couple of minutes, so `POST /lectures/upload` returns `202 Accepted` immediately with a `ProcessingJob` id and the work runs via FastAPI `BackgroundTasks`. A broker (Celery/Redis) would add real value for multi-worker horizontal scaling, but at this project's scale the actual reliability gap was stale-job recovery and retry, not a missing queue — so that's what got built (see above) instead of a broker this app doesn't otherwise need.
+
+**How API latency was reduced?** Mainly by removing N+1 query patterns (see above) and moving vector similarity search from a Python loop into an indexed Postgres query — both reduce round trips and data transferred rather than adding caching layers. The embedding provider, LLM provider, and settings are already cached as process-level singletons (`get_embedding_provider`, `get_llm_provider`, `get_settings` via `lru_cache`), which was the existing, correct caching strategy; per-answer LLM response caching was deliberately *not* added since question text is user-specific and often unique, and caching it risks staleness for negligible hit rate.
+
+**How failed jobs are handled?** A job's `ProcessingJob.status` moves through `queued → processing → completed | failed`. On failure — whether from an exception during processing or a startup sweep finding an orphaned job — the row is marked `failed` with a clean, user-safe message; it is never left stuck in `processing`. `POST /lectures/{id}/retry` creates a fresh `ProcessingJob` and re-runs the pipeline, rejecting the call with `409` if a job is already in flight so retries can't race a running job.
 
 ---
 

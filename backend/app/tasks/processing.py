@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 from datetime import datetime
 import logging
+import time
 
 from app.models import (
     Lecture, ProcessingJob, TranscriptSegment, LectureNote,
@@ -34,8 +35,46 @@ def _update_job(db: Session, job: ProcessingJob, **fields) -> None:
     db.flush()
 
 
+STALE_JOB_MESSAGE = "Processing was interrupted by a server restart. Please retry."
+
+
+def sweep_stale_jobs() -> int:
+    """Mark any job left in queued/processing as failed.
+
+    process_lecture_job runs in-process via FastAPI BackgroundTasks (no
+    Celery/Redis broker persisting queued work). If the process is
+    restarted (crash, redeploy, `--reload`) while a job is running, its row
+    is orphaned at status="processing" forever with no way for the user to
+    retry — this violates "do not leave stuck in PROCESSING" from the
+    reliability requirements. Since nothing can legitimately still be
+    running the instant this process starts, every such row is from a dead
+    process and is safe to fail here; the user can then hit the retry
+    endpoint. Returns the number of jobs swept, for startup logging.
+    """
+    db = SessionLocal()
+    try:
+        stale = (
+            db.query(ProcessingJob)
+            .filter(ProcessingJob.status.in_(["queued", "processing"]))
+            .all()
+        )
+        for job in stale:
+            job.status = "failed"
+            job.error_message = STALE_JOB_MESSAGE
+            job.completed_at = datetime.utcnow()
+            job.updated_at = datetime.utcnow()
+            lecture = db.query(Lecture).filter(Lecture.id == job.lecture_id).first()
+            if lecture and lecture.status not in ("processed",):
+                lecture.status = "error"
+        db.commit()
+        return len(stale)
+    finally:
+        db.close()
+
+
 def process_lecture_job(job_id: int) -> None:
     db = SessionLocal()
+    job_started = time.perf_counter()
     try:
         job = db.query(ProcessingJob).filter(ProcessingJob.id == job_id).first()
         if not job:
@@ -46,25 +85,37 @@ def process_lecture_job(job_id: int) -> None:
             db.commit()
             return
 
+        phase_t = time.perf_counter()
+
+        def _log_phase(name: str) -> None:
+            nonlocal phase_t
+            now = time.perf_counter()
+            logger.info("job=%s phase=%r duration_ms=%.1f", job_id, name, (now - phase_t) * 1000)
+            phase_t = now
+
         try:
             _update_job(db, job, status="processing", current_step="Validating inputs", progress=5, started_at=datetime.utcnow())
             db.commit()
             db.refresh(job)
 
             segments = _extract_all_segments(db, lecture, job)
+            _log_phase("extract_segments")
 
             _update_job(db, job, current_step="Generating structured notes", progress=35)
             db.commit()
             note = _generate_notes(db, lecture, segments)
+            _log_phase("generate_notes")
 
             _update_job(db, job, current_step="Extracting and merging topics", progress=60)
             db.commit()
             _extract_topics_pipeline(db, lecture, segments, note)
+            _log_phase("extract_topics")
 
             _update_job(db, job, current_step="Indexing for search", progress=80)
             db.commit()
             notes_text = _flatten_note(note)
             reindex_lecture(db, lecture.id, notes_text)
+            _log_phase("reindex")
 
             _update_job(db, job, current_step="Updating course study guide", progress=90)
             db.commit()
@@ -72,14 +123,21 @@ def process_lecture_job(job_id: int) -> None:
                 generate_study_guide(db, lecture.course_id)
             except Exception as e:
                 logger.warning(f"Study guide generation failed: {e}")
+            _log_phase("study_guide")
 
             lecture.status = "processed"
             _update_job(db, job, status="completed", current_step="Done", progress=100, completed_at=datetime.utcnow())
+            logger.info("job=%s completed total_duration_ms=%.1f", job_id, (time.perf_counter() - job_started) * 1000)
             db.commit()
         except Exception as e:
-            logger.exception(f"Processing failed for job {job_id}")
+            logger.exception(
+                "job=%s failed after total_duration_ms=%.1f",
+                job_id, (time.perf_counter() - job_started) * 1000,
+            )
             lecture.status = "error"
-            _update_job(db, job, status="failed", error_message=str(e)[:1000], completed_at=datetime.utcnow())
+            # Store a generic, user-safe message on the job; the real exception
+            # (with traceback) stays in the server log above via logger.exception.
+            _update_job(db, job, status="failed", error_message="Document processing failed. Please retry.", completed_at=datetime.utcnow())
             db.commit()
     finally:
         db.close()

@@ -114,17 +114,27 @@ def add_topic_mention(
 
 def recalculate_topic_stats(db: Session, course_id: int) -> None:
     topics = db.query(Topic).filter(Topic.course_id == course_id).all()
+    if not topics:
+        return
+
+    # These were previously re-queried once per topic even though they don't
+    # depend on the topic being processed, turning an O(topics) pass into
+    # O(topics) identical queries. Fetch once and reuse.
+    total_lectures = max(1, db.query(Lecture).filter(Lecture.course_id == course_id).count())
+
+    topic_ids = [t.id for t in topics]
+    mentions_by_topic: Dict[int, List[TopicMention]] = defaultdict(list)
+    for m in db.query(TopicMention).filter(TopicMention.topic_id.in_(topic_ids)).all():
+        mentions_by_topic[m.topic_id].append(m)
+
     for t in topics:
-        mentions = db.query(TopicMention).filter(TopicMention.topic_id == t.id).all()
+        mentions = mentions_by_topic.get(t.id, [])
         lecture_ids = set(m.lecture_id for m in mentions)
         source_types = set(m.source_type for m in mentions)
 
         lecture_count = len(lecture_ids)
         evidence_count = len(mentions)
         src_count = len(source_types)
-
-        lectures = db.query(Lecture).filter(Lecture.course_id == course_id).all()
-        total_lectures = max(1, len(lectures))
 
         lecture_span = lecture_count / total_lectures
         evidence_norm = min(1.0, evidence_count / max(5, total_lectures * 3))
@@ -140,7 +150,11 @@ def recalculate_topic_stats(db: Session, course_id: int) -> None:
         t.evidence_count = evidence_count
         t.coverage_score = round(min(1.0, score), 4)
 
-        related = find_related_topics(db, t, limit=5)
+    # All topics with embeddings, fetched once and reused for every topic's
+    # related-topics lookup below instead of one near-identical query per topic.
+    embedded_topics = [t for t in topics if t.embedding is not None]
+    for t in topics:
+        related = find_related_topics(db, t, limit=5, candidates=embedded_topics)
         t.related_topics = [
             {"id": r.id, "name": r.canonical_name, "score": s}
             for r, s in related if r.id != t.id
@@ -149,14 +163,22 @@ def recalculate_topic_stats(db: Session, course_id: int) -> None:
     db.flush()
 
 
-def find_related_topics(db: Session, topic: Topic, limit: int = 5) -> List[Tuple[Topic, float]]:
+def find_related_topics(
+    db: Session,
+    topic: Topic,
+    limit: int = 5,
+    candidates: Optional[List[Topic]] = None,
+) -> List[Tuple[Topic, float]]:
     if topic.embedding is None:
         return []
-    others = (
-        db.query(Topic)
-        .filter(Topic.course_id == topic.course_id, Topic.id != topic.id, Topic.embedding.isnot(None))
-        .all()
-    )
+    if candidates is not None:
+        others = [c for c in candidates if c.id != topic.id]
+    else:
+        others = (
+            db.query(Topic)
+            .filter(Topic.course_id == topic.course_id, Topic.id != topic.id, Topic.embedding.isnot(None))
+            .all()
+        )
     scored = []
     for o in others:
         sim = cosine_similarity(topic.embedding, o.embedding)
@@ -180,8 +202,11 @@ def get_topic_timeline(db: Session, topic_id: int) -> List[Dict[str, Any]]:
     events = []
     first = True
     lecture_ids_sorted = sorted(by_lecture.keys())
+    lectures_by_id = {
+        l.id: l for l in db.query(Lecture).filter(Lecture.id.in_(lecture_ids_sorted)).all()
+    } if lecture_ids_sorted else {}
     for lid in lecture_ids_sorted:
-        lecture = db.query(Lecture).filter(Lecture.id == lid).first()
+        lecture = lectures_by_id.get(lid)
         if not lecture:
             continue
         ms = by_lecture[lid]

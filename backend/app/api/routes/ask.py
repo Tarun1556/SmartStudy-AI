@@ -1,17 +1,18 @@
+import logging
+import time
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.api.deps import get_current_user
-from app.models import (
-    User, Course, SearchDocument, ChatSession, ChatMessage, Lecture
-)
+from app.models import User, Course, ChatSession, ChatMessage
 from app.schemas import AskRequest, AskResponse, Citation, ChatSessionRead, ChatMessageRead
 from app.services.search import search_hybrid
 from app.services.llm import get_llm_provider
 
 router = APIRouter()
+logger = logging.getLogger("studyapp.rag")
 
 
 def _check_course_owner(db, course_id, user):
@@ -53,21 +54,30 @@ def ask_question(
     user_msg = ChatMessage(session_id=session_id, role="user", content=req.question)
     db.add(user_msg)
 
+    t_retrieval = time.perf_counter()
     retrieved = search_hybrid(db, req.course_id, req.question, mode="hybrid", limit=8)
+    retrieval_ms = (time.perf_counter() - t_retrieval) * 1000
     context_chunks = []
     for r in retrieved:
-        lecture = db.query(Lecture).filter(Lecture.id == r.get("lecture_id")).first() if r.get("lecture_id") else None
+        # search_hybrid already resolved lecture_title/lecture_number in a single
+        # batched query; re-querying Lecture per chunk here would be an N+1.
         context_chunks.append({
             "lecture_id": r.get("lecture_id"),
-            "lecture_title": lecture.title if lecture else r.get("lecture_title", "Unknown"),
-            "lecture_number": lecture.lecture_number if lecture else r.get("metadata", {}).get("lecture_number"),
+            "lecture_title": r.get("lecture_title") or "Unknown",
+            "lecture_number": r.get("lecture_number") or r.get("metadata", {}).get("lecture_number"),
             "content": r.get("content", r.get("snippet", "")),
             "snippet": r.get("snippet", ""),
             "start_time": r.get("metadata", {}).get("start_time") if isinstance(r.get("metadata"), dict) else None,
         })
 
+    t_llm = time.perf_counter()
     llm = get_llm_provider()
     answer_data = llm.answer_question(req.question, context_chunks)
+    llm_ms = (time.perf_counter() - t_llm) * 1000
+    logger.info(
+        "ask course=%s chunks=%d retrieval_ms=%.1f llm_ms=%.1f total_ms=%.1f",
+        req.course_id, len(context_chunks), retrieval_ms, llm_ms, retrieval_ms + llm_ms,
+    )
 
     answer = answer_data.get("answer", "")
     citations_raw = answer_data.get("citations", []) or []

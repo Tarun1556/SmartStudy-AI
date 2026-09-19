@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { EmptyState, Spinner } from "@/components/common/helpers";
 import {
-  useLecture, useLectureNotes, useLectureStatus, useCourseTopics,
+  useLecture, useLectureNotes, useLectureStatus, useCourseTopics, useRetryLectureProcessing,
 } from "@/lib/api/hooks";
 import { cn, formatDate, coverageBadge, coverageLabel, formatCoverage } from "@/lib/utils";
 import type { Topic } from "@/types";
@@ -25,6 +25,7 @@ export default function LectureDetail() {
   const { data: notes, isLoading: loadingNotes } = useLectureNotes(lectureId);
   const liveStatus = useLectureStatus(lectureId);
   const { data: courseTopics } = useCourseTopics(lecture?.course_id || null);
+  const retryMut = useRetryLectureProcessing();
 
   const status = liveStatus.data || lecture?.latest_job;
 
@@ -94,10 +95,22 @@ export default function LectureDetail() {
         <Card className="border-rose-500/30 bg-rose-500/10">
           <CardContent className="p-5 flex items-start gap-3">
             <AlertCircle className="h-5 w-5 text-rose-400 mt-0.5 shrink-0" />
-            <div>
+            <div className="flex-1">
               <div className="text-sm font-medium text-rose-300">Processing failed</div>
               <div className="text-sm text-rose-400/80 mt-1">{status.error_message || "Unknown error"}</div>
+              {retryMut.isError && (
+                <div className="text-xs text-rose-400/80 mt-1">Retry failed to start. Please try again.</div>
+              )}
             </div>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={retryMut.isPending}
+              onClick={() => lectureId && retryMut.mutate(lectureId)}
+            >
+              {retryMut.isPending && <Spinner className="h-4 w-4" />}
+              Retry
+            </Button>
           </CardContent>
         </Card>
       )}

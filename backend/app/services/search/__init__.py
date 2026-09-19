@@ -1,3 +1,5 @@
+import logging
+import time
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import text, and_
@@ -7,6 +9,7 @@ from app.services.embeddings import get_embedding_provider, cosine_similarity
 from app.core.config import get_settings
 
 settings = get_settings()
+logger = logging.getLogger("studyapp.search")
 
 
 def index_document(
@@ -110,6 +113,42 @@ def _note_to_text(note) -> str:
     return "\n".join(p for p in parts if p)
 
 
+def _is_postgres(db: Session) -> bool:
+    return db.bind is not None and db.bind.dialect.name == "postgresql"
+
+
+def _semantic_candidates(db: Session, course_id: int, q_emb: List[float], limit: int) -> List[tuple]:
+    """Return (SearchDocument, similarity) pairs for the query embedding.
+
+    On Postgres this runs the similarity search inside the database using
+    pgvector's cosine-distance operator (indexed via the HNSW index created in
+    init_db) instead of pulling every candidate row into Python. SQLite (used
+    in tests, where the Vector column is monkey-patched to JSON) falls back to
+    the original in-process scoring loop over a bounded candidate set.
+    """
+    if _is_postgres(db):
+        try:
+            distance = SearchDocument.embedding.cosine_distance(q_emb)
+            rows = (
+                db.query(SearchDocument, distance.label("distance"))
+                .filter(SearchDocument.course_id == course_id, SearchDocument.embedding.isnot(None))
+                .order_by(distance)
+                .limit(limit)
+                .all()
+            )
+            return [(d, max(0.0, 1.0 - dist)) for d, dist in rows]
+        except Exception:
+            logger.warning("pgvector similarity query failed, falling back to Python scoring", exc_info=True)
+
+    docs = db.query(SearchDocument).filter(
+        SearchDocument.course_id == course_id,
+        SearchDocument.embedding.isnot(None),
+    ).limit(200).all()
+    scored = [(d, cosine_similarity(q_emb, d.embedding) if d.embedding is not None else 0.0) for d in docs]
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:limit]
+
+
 def search_hybrid(
     db: Session,
     course_id: int,
@@ -121,7 +160,9 @@ def search_hybrid(
     if not query:
         return []
 
-    results_map: Dict[int, Dict[str, Any]] = {}
+    t0 = time.perf_counter()
+    # doc.id -> {"doc": SearchDocument, "score": float}
+    scored_docs: Dict[int, Dict[str, Any]] = {}
 
     if mode in ("keyword", "hybrid"):
         try:
@@ -148,36 +189,24 @@ def search_hybrid(
                 .all()
             )
         for i, d in enumerate(docs):
-            kw_score = 1.0 - (i * 0.05)
-            if d.id in results_map:
-                results_map[d.id]["score"] += kw_score * 0.5
+            kw_score = (1.0 - (i * 0.05)) * 0.5
+            if d.id in scored_docs:
+                scored_docs[d.id]["score"] += kw_score
             else:
-                results_map[d.id] = _to_result(d, kw_score * 0.5, query)
+                scored_docs[d.id] = {"doc": d, "score": kw_score}
 
     if mode in ("semantic", "meaning", "hybrid"):
         try:
             prov = get_embedding_provider()
             q_emb = prov.embed_texts([query])[0]
-            docs = db.query(SearchDocument).filter(
-                SearchDocument.course_id == course_id,
-                SearchDocument.embedding.isnot(None),
-            ).limit(200).all()
-
-            scored = []
-            for d in docs:
-                sim = cosine_similarity(q_emb, d.embedding) if d.embedding is not None else 0.0
-                scored.append((d, sim))
-            scored.sort(key=lambda x: x[1], reverse=True)
-
-            for d, sim in scored[:limit]:
-                sem_score = sim
-                if d.id in results_map:
-                    results_map[d.id]["score"] += sem_score * 0.7
-                    results_map[d.id]["relevance_score"] = round(results_map[d.id]["score"], 4)
+            for d, sim in _semantic_candidates(db, course_id, q_emb, limit):
+                sem_score = sim * 0.7
+                if d.id in scored_docs:
+                    scored_docs[d.id]["score"] += sem_score
                 else:
-                    results_map[d.id] = _to_result(d, sem_score * 0.7, query)
+                    scored_docs[d.id] = {"doc": d, "score": sem_score}
         except Exception:
-            pass
+            logger.warning("Semantic search branch failed", exc_info=True)
 
     if mode not in ("keyword", "semantic", "meaning", "hybrid"):
         docs = (
@@ -188,20 +217,28 @@ def search_hybrid(
             .all()
         )
         for d in docs:
-            results_map[d.id] = _to_result(d, 0.5, query)
+            scored_docs[d.id] = {"doc": d, "score": 0.5}
 
-    sorted_results = sorted(results_map.values(), key=lambda r: r["relevance_score"], reverse=True)
-    return sorted_results[:limit]
+    top = sorted(scored_docs.values(), key=lambda r: r["score"], reverse=True)[:limit]
+
+    # Batch-fetch the lectures needed for just the final result set (one query)
+    # instead of one query per document, and without the previous unbounded,
+    # never-invalidated module-level cache.
+    lecture_ids = {e["doc"].lecture_id for e in top if e["doc"].lecture_id}
+    lectures_by_id: Dict[int, Lecture] = {}
+    if lecture_ids:
+        for l in db.query(Lecture).filter(Lecture.id.in_(lecture_ids)).all():
+            lectures_by_id[l.id] = l
+
+    results = [_to_result(e["doc"], e["score"], query, lectures_by_id.get(e["doc"].lecture_id)) for e in top]
+    logger.info(
+        "search_hybrid course=%s mode=%s results=%d duration_ms=%.1f",
+        course_id, mode, len(results), (time.perf_counter() - t0) * 1000,
+    )
+    return results
 
 
-def _to_result(d: SearchDocument, score: float, query: str = "") -> Dict[str, Any]:
-    lecture_title = None
-    lecture = None
-    if d.lecture_id:
-        lecture = db_get_lecture(d.lecture_id)
-        if lecture:
-            lecture_title = lecture.title
-
+def _to_result(d: SearchDocument, score: float, query: str, lecture: Optional[Lecture]) -> Dict[str, Any]:
     snippet = d.snippet or d.content[:300]
     if query:
         snippet = highlight_snippet(d.content, query)
@@ -210,34 +247,16 @@ def _to_result(d: SearchDocument, score: float, query: str = "") -> Dict[str, An
         "document_id": d.id,
         "doc_type": d.doc_type,
         "lecture_id": d.lecture_id,
-        "lecture_title": lecture_title,
+        "lecture_title": lecture.title if lecture else None,
+        "lecture_number": lecture.lecture_number if lecture else None,
         "title": d.title,
         "snippet": snippet,
         "relevance_score": round(score, 4),
-        "source_reference": f"Lecture {getattr(lecture, 'lecture_number', '?') if lecture else '?'}" if lecture else "",
+        "source_reference": f"Lecture {lecture.lecture_number}" if lecture and lecture.lecture_number else (f"Lecture {lecture.id}" if lecture else ""),
         "content": d.content,
         "metadata": d.doc_metadata or {},
         "_score_raw": score,
     }
-
-
-_lecture_cache: Dict[int, Any] = {}
-
-
-def db_get_lecture(lecture_id: int):
-    if lecture_id in _lecture_cache:
-        return _lecture_cache[lecture_id]
-    from app.db.session import SessionLocal
-    try:
-        db2 = SessionLocal()
-        l = db2.query(Lecture).filter(Lecture.id == lecture_id).first()
-        _lecture_cache[lecture_id] = l
-        return l
-    finally:
-        try:
-            db2.close()
-        except Exception:
-            pass
 
 
 def highlight_snippet(text: str, query: str, window: int = 100) -> str:

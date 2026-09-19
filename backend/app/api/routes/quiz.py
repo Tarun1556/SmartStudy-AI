@@ -1,4 +1,5 @@
-from typing import List
+from typing import List, Dict
+from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
@@ -44,15 +45,23 @@ def generate_quiz(
         topics_q = topics_q.filter(Topic.id.in_(req.topic_ids))
     topics = topics_q.order_by(Topic.coverage_score.desc()).limit(30).all()
 
-    for t in topics:
-        mentions = (
+    # Single batched query instead of one TopicMention query per topic (was up
+    # to 30 round trips for a 30-topic quiz); group and take top-3 per topic
+    # in Python since the whole batch is already bounded and in memory.
+    topic_ids = [t.id for t in topics]
+    mentions_by_topic: Dict[int, List[TopicMention]] = defaultdict(list)
+    if topic_ids:
+        all_mentions = (
             db.query(TopicMention)
-            .filter(TopicMention.topic_id == t.id)
+            .filter(TopicMention.topic_id.in_(topic_ids))
             .order_by(TopicMention.confidence.desc())
-            .limit(3)
             .all()
         )
-        for m in mentions:
+        for m in all_mentions:
+            mentions_by_topic[m.topic_id].append(m)
+
+    for t in topics:
+        for m in mentions_by_topic.get(t.id, [])[:3]:
             content.append({
                 "topic_id": t.id,
                 "term": t.canonical_name,

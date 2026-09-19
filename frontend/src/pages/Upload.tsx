@@ -52,7 +52,7 @@ export default function Upload() {
   const [created, setCreated] = React.useState<{ lecture_id: number; job_id: number } | null>(null);
   const [tab, setTab] = React.useState<"file" | "paste">("file");
 
-  const { data: jobStatus } = useLectureStatus(created?.job_id ? null : null, 1500);
+  const { data: jobStatus } = useLectureStatus(created?.lecture_id ?? null, 1500);
 
   React.useEffect(() => {
     if (courses && courses.length > 0 && !courseId) {

@@ -35,6 +35,14 @@ def _check_topic_course(db, topic_id, user):
     return topic
 
 
+def _lectures_by_id(db, lecture_ids):
+    """Batch-fetch lectures in one query instead of one query per row in a loop."""
+    ids = {lid for lid in lecture_ids if lid is not None}
+    if not ids:
+        return {}
+    return {l.id: l for l in db.query(Lecture).filter(Lecture.id.in_(ids)).all()}
+
+
 @router.get("/courses/{course_id}/topics", response_model=List[TopicRead])
 def list_course_topics(
     course_id: int,
@@ -69,9 +77,10 @@ def get_topic_detail(
         .limit(30)
         .all()
     )
+    lectures_by_id = _lectures_by_id(db, [m.lecture_id for m in mentions])
     evidence = []
     for m in mentions:
-        lecture = db.query(Lecture).filter(Lecture.id == m.lecture_id).first()
+        lecture = lectures_by_id.get(m.lecture_id)
         evidence.append(EvidenceSnippet(
             lecture_id=m.lecture_id,
             lecture_title=lecture.title if lecture else "Unknown",
@@ -119,9 +128,10 @@ def get_topic_evidence(
         .limit(limit)
         .all()
     )
+    lectures_by_id = _lectures_by_id(db, [m.lecture_id for m in mentions])
     result = []
     for m in mentions:
-        lecture = db.query(Lecture).filter(Lecture.id == m.lecture_id).first()
+        lecture = lectures_by_id.get(m.lecture_id)
         read = TopicMentionRead.model_validate(m)
         if lecture:
             read.lecture_title = lecture.title
