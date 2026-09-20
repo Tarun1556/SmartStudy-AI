@@ -359,7 +359,7 @@ SmartStudy-AI/
 
 ```bash
 git clone <this-repo-url>
-cd Ideathon
+cd SmartStudy-AI
 cp .env.example .env      # fill in an LLM key, or leave LLM_PROVIDER=mock for a no-key demo
 docker compose up --build
 ```
