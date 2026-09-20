@@ -1,4 +1,4 @@
-# 📚 StudyAI — The Lecture Knowledge System
+# 📚 SmartStudy-AI — The Lecture Knowledge System
 
 **Turn a semester of scattered lectures into one living, queryable knowledge base — with topic tracking, coverage scoring, grounded Q&A, and auto-generated study guides & quizzes.**
 
@@ -14,11 +14,11 @@
 
 ## What is this?
 
-StudyAI ingests everything a course throws at a student — PDF slides, PPTX decks, recorded audio, plain notes — and converts it into **structured, cited study material** that accumulates and improves *across the whole course*, not just per file.
+SmartStudy-AI ingests everything a course throws at a student — PDF slides, PPTX decks, recorded audio, plain notes — and converts it into **structured, cited study material** that accumulates and improves *across the whole course*, not just per file.
 
-Upload lecture 1, then lecture 2, then lecture 12: StudyAI transcribes/extracts the content, writes structured notes, extracts key concepts, and **merges those concepts into one persistent knowledge graph per course** — so "BST" from week 2 and "Binary Search Tree" from week 9 become the *same* tracked topic, with a coverage score and a timeline of where it was introduced, revisited, and expanded.
+Upload lecture 1, then lecture 2, then lecture 12: SmartStudy-AI transcribes/extracts the content, writes structured notes, extracts key concepts, and **merges those concepts into one persistent knowledge graph per course** — so "BST" from week 2 and "Binary Search Tree" from week 9 become the *same* tracked topic, with a coverage score and a timeline of where it was introduced, revisited, and expanded.
 
-On top of that knowledge base, StudyAI generates:
+On top of that knowledge base, SmartStudy-AI generates:
 
 - **Grounded Q&A** — ask a question, get an answer synthesized strictly from your own uploaded material, with citations back to the exact lecture and timestamp/snippet.
 - **Semantic search** — vector search across every note, transcript, and definition in a course.
@@ -318,7 +318,7 @@ A **PostgreSQL advisory lock** (`pg_advisory_xact_lock` on `course_id`) guards t
 ## Project structure
 
 ```
-Ideathon/
+SmartStudy-AI/
 ├── backend/
 │   ├── app/
 │   │   ├── main.py                 # FastAPI app, router registration, CORS
@@ -483,7 +483,7 @@ This section documents what was actually profiled and changed, not a wishlist �
 
 Tools like Google's NotebookLM, ChatPDF, or generic "chat with your PDF" apps are excellent at **one thing**: let you drop in some documents and ask questions grounded in them, inside a single notebook/session. StudyAI is built around a different unit of work — **an entire course, over an entire semester** — and that changes the architecture, not just the UI.
 
-| | NotebookLM / "chat with PDF" tools | StudyAI |
+| | NotebookLM / "chat with PDF" tools | SmartStudy-AI |
 |---|---|---|
 | **Unit of knowledge** | A notebook / a document set, largely siloed per session | A **course**: every lecture you upload over weeks/months contributes to one growing knowledge base |
 | **Concept tracking** | None — no persistent notion of "topics" across documents | A **deduplicated topic graph**: concepts are extracted, embedded, and merged across lectures (e.g. "BST" and "Binary Search Tree" become one tracked `Topic`) using cosine similarity, not just keyword match |
