@@ -216,7 +216,7 @@ function MessageBubble({ msg, courseId }: { msg: Message; courseId: number }) {
           <div className="flex items-start gap-2 text-amber-400">
             <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
             <div>
-              <div className="font-medium">Not found in your material</div>
+              <div className="font-medium">Concept Not found in your material</div>
               <div className="mt-1 text-amber-400/80">{msg.content}</div>
             </div>
           </div>
