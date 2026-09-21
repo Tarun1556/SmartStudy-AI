@@ -12,6 +12,8 @@ import StudyGuide from "@/pages/StudyGuide";
 import Search from "@/pages/Search";
 import Ask from "@/pages/Ask";
 import QuizPage from "@/pages/QuizPage";
+import QuestionPapers from "@/pages/QuestionPapers";
+import ExamInsights from "@/pages/ExamInsights";
 import AppLayout from "@/components/layout/AppLayout";
 import { useAuth } from "@/features/auth/AuthContext";
 import { Spinner } from "@/components/common/helpers";
@@ -48,6 +50,8 @@ export default function App() {
         <Route path="/upload" element={<Upload />} />
         <Route path="/lectures/:id" element={<LectureDetail />} />
         <Route path="/courses/:id/study-guide" element={<StudyGuide />} />
+        <Route path="/courses/:id/question-papers" element={<QuestionPapers />} />
+        <Route path="/courses/:id/exam-insights" element={<ExamInsights />} />
         <Route path="/search" element={<Search />} />
         <Route path="/ask/:courseId" element={<Ask />} />
         <Route path="/quiz/:courseId" element={<QuizPage />} />

@@ -92,6 +92,15 @@ class LLMProvider(ABC):
         ...
 
     @abstractmethod
+    def parse_question_paper(self, raw_text: str, regex_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Normalize regex-segmented exam-question blocks into clean structured
+        data: [{question_number, section, question_text, marks}]. Implementations
+        must never fabricate questions not grounded in raw_text/regex_blocks —
+        when unsure, they should return the regex_blocks as given rather than
+        guess, since the original question text must always be preserved."""
+        ...
+
+    @abstractmethod
     def merge_topic_labels(self, candidate: str, existing: List[Dict[str, Any]]) -> Optional[str]:
         ...
 
@@ -216,6 +225,23 @@ class MockProvider(LLMProvider):
                 })
 
         return topics[:25]
+
+    def parse_question_paper(self, raw_text: str, regex_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        # Deterministic pass-through/cleanup: regex segmentation already did the
+        # real work (see services/question_papers/extraction.py); Mock just
+        # normalizes whitespace so tests exercise real logic without any LLM call.
+        cleaned = []
+        for b in regex_blocks:
+            text = re.sub(r'\s+', ' ', str(b.get("question_text", ""))).strip()
+            if not text:
+                continue
+            cleaned.append({
+                "question_number": b.get("question_number"),
+                "section": b.get("section"),
+                "question_text": text,
+                "marks": b.get("marks"),
+            })
+        return cleaned
 
     def merge_topic_labels(self, candidate: str, existing: List[Dict[str, Any]]) -> Optional[str]:
         can_lower = candidate.strip().lower().rstrip("s")
@@ -544,6 +570,47 @@ class OpenAIProvider(_BaseHTTPProvider):
             })
         return cleaned[:30] or fallback
 
+    def parse_question_paper(self, raw_text: str, regex_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        fallback = self._fallback.parse_question_paper(raw_text, regex_blocks)
+        if not self.client or not self.api_key or not regex_blocks:
+            return fallback
+        schema = (
+            "Array of objects with: question_number (string|null), section (string|null), "
+            "question_text (string), marks (integer|null)."
+        )
+        sys = (
+            "You clean up and normalize exam question papers that were mechanically segmented by regex. "
+            "Return ONLY a valid JSON array with EXACTLY one output object per input block, in the same order. "
+            f"Expected schema: {schema}. "
+            "Fix obvious OCR/formatting noise in question_text but do NOT change its meaning, invent content, "
+            "merge blocks, or drop blocks. Only fill question_number/section/marks when clearly identifiable in "
+            "the block or surrounding raw text; otherwise keep them null exactly as given."
+        )
+        user_payload = json.dumps({
+            "raw_text_excerpt": raw_text[:4000],
+            "regex_blocks": regex_blocks[:80],
+        })
+        result = self._chat_json_array(sys, user_payload, schema, fallback)
+        if not isinstance(result, list) or len(result) != len(regex_blocks):
+            return fallback
+        cleaned = []
+        for orig, r in zip(regex_blocks, result):
+            if not isinstance(r, dict) or not str(r.get("question_text", "")).strip():
+                cleaned.append(orig)
+                continue
+            marks = r.get("marks")
+            try:
+                marks = int(marks) if marks is not None else None
+            except (ValueError, TypeError):
+                marks = orig.get("marks")
+            cleaned.append({
+                "question_number": r.get("question_number") or orig.get("question_number"),
+                "section": r.get("section") or orig.get("section"),
+                "question_text": str(r.get("question_text")).strip()[:4000],
+                "marks": marks,
+            })
+        return cleaned or fallback
+
     def merge_topic_labels(self, candidate: str, existing: List[Dict[str, Any]]) -> Optional[str]:
         return self._fallback.merge_topic_labels(candidate, existing)
 
@@ -810,6 +877,39 @@ class AnthropicProvider(_BaseHTTPProvider):
                 })
         return cleaned[:30] or fallback
 
+    def parse_question_paper(self, raw_text: str, regex_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        fallback = self._fallback.parse_question_paper(raw_text, regex_blocks)
+        if not self.client or not self.api_key or not regex_blocks:
+            return fallback
+        sys = (
+            "You clean up exam question papers that were mechanically segmented by regex. "
+            "Return ONLY a valid JSON array, one object per input block, same order, same length. "
+            "Each object: question_number(string|null), section(string|null), question_text(string), marks(integer|null). "
+            "Fix formatting noise only; never invent, merge, drop, or reorder blocks. "
+            "Only set question_number/section/marks when clearly identifiable, else keep them null."
+        )
+        user_payload = json.dumps({"raw_text_excerpt": raw_text[:4000], "regex_blocks": regex_blocks[:80]})
+        result = self._chat_json_array(sys, user_payload, "normalized question blocks JSON array", fallback) or fallback
+        if not isinstance(result, list) or len(result) != len(regex_blocks):
+            return fallback
+        cleaned = []
+        for orig, r in zip(regex_blocks, result):
+            if not isinstance(r, dict) or not str(r.get("question_text", "")).strip():
+                cleaned.append(orig)
+                continue
+            marks = r.get("marks")
+            try:
+                marks = int(marks) if marks is not None else None
+            except (ValueError, TypeError):
+                marks = orig.get("marks")
+            cleaned.append({
+                "question_number": r.get("question_number") or orig.get("question_number"),
+                "section": r.get("section") or orig.get("section"),
+                "question_text": str(r.get("question_text")).strip()[:4000],
+                "marks": marks,
+            })
+        return cleaned or fallback
+
     def merge_topic_labels(self, candidate: str, existing: List[Dict[str, Any]]) -> Optional[str]:
         return self._fallback.merge_topic_labels(candidate, existing)
 
@@ -1003,6 +1103,37 @@ class GeminiProvider(_BaseHTTPProvider):
                     "confidence": float(t.get("confidence", 0.7)),
                 })
         return cleaned[:30] or fallback
+
+    def parse_question_paper(self, raw_text: str, regex_blocks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        fallback = self._fallback.parse_question_paper(raw_text, regex_blocks)
+        if not self.client or not self.api_key or not regex_blocks:
+            return fallback
+        sys = (
+            "Clean up exam question blocks that were mechanically segmented by regex. Return ONLY a valid JSON "
+            "array, one object per input block, same order/length: {question_number, section, question_text, marks}. "
+            "Fix formatting noise only; never invent, merge, drop or reorder blocks. Null out fields you can't identify."
+        )
+        user_payload = json.dumps({"raw_text_excerpt": raw_text[:4000], "regex_blocks": regex_blocks[:80]})
+        result = self._chat_json_array(sys, user_payload, "normalized question blocks", fallback) or fallback
+        if not isinstance(result, list) or len(result) != len(regex_blocks):
+            return fallback
+        cleaned = []
+        for orig, r in zip(regex_blocks, result):
+            if not isinstance(r, dict) or not str(r.get("question_text", "")).strip():
+                cleaned.append(orig)
+                continue
+            marks = r.get("marks")
+            try:
+                marks = int(marks) if marks is not None else None
+            except (ValueError, TypeError):
+                marks = orig.get("marks")
+            cleaned.append({
+                "question_number": r.get("question_number") or orig.get("question_number"),
+                "section": r.get("section") or orig.get("section"),
+                "question_text": str(r.get("question_text")).strip()[:4000],
+                "marks": marks,
+            })
+        return cleaned or fallback
 
     def merge_topic_labels(self, candidate: str, existing: List[Dict[str, Any]]) -> Optional[str]:
         return self._fallback.merge_topic_labels(candidate, existing)

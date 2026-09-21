@@ -31,6 +31,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Stale job sweep failed: {e}")
     try:
+        from app.tasks.question_paper_processing import sweep_stale_question_paper_jobs
+        swept_qp = sweep_stale_question_paper_jobs()
+        if swept_qp:
+            logger.warning(
+                "Marked %d question paper processing job(s) failed on startup (interrupted by previous restart)", swept_qp,
+            )
+    except Exception as e:
+        logger.error(f"Stale question paper job sweep failed: {e}")
+    try:
         from app.tasks.demo_seed import ensure_demo_seeded
         ensure_demo_seeded()
         logger.info("Demo content seeded")
@@ -92,6 +101,7 @@ from app.api.routes.ask import router as ask_router
 from app.api.routes.quiz import router as quiz_router
 from app.api.routes.demo import router as demo_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.question_papers import router as question_papers_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 app.include_router(courses_router, prefix="/api/courses", tags=["courses"])
@@ -103,3 +113,4 @@ app.include_router(ask_router, prefix="/api/ask", tags=["ask"])
 app.include_router(quiz_router, prefix="/api/quiz", tags=["quiz"])
 app.include_router(demo_router, prefix="/api/demo", tags=["demo"])
 app.include_router(dashboard_router, prefix="/api/dashboard", tags=["dashboard"])
+app.include_router(question_papers_router, prefix="/api", tags=["question-papers"])

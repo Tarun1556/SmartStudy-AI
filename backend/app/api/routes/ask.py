@@ -10,9 +10,59 @@ from app.models import User, Course, ChatSession, ChatMessage
 from app.schemas import AskRequest, AskResponse, Citation, ChatSessionRead, ChatMessageRead
 from app.services.search import search_hybrid
 from app.services.llm import get_llm_provider
+from app.services.question_papers.analysis import compute_topic_exam_stats
 
 router = APIRouter()
 logger = logging.getLogger("studyapp.rag")
+
+# Deliberately simple keyword heuristic rather than a separate intent
+# classifier — matches spec's "kept deliberately simple" guidance. False
+# positives just mean the exam-evidence block is included when it didn't
+# need to be, which is harmless (it's still grounded, factual context).
+_EXAM_INTENT_KEYWORDS = (
+    "exam", "semester exam", "study first", "prioritize", "priority",
+    "most important topic", "what should i study", "study guide",
+)
+
+
+def _is_exam_intent(question: str) -> bool:
+    q = question.lower()
+    return any(kw in q for kw in _EXAM_INTENT_KEYWORDS)
+
+
+def _exam_evidence_chunk(db: Session, course_id: int):
+    """A synthetic context chunk carrying historical question-paper evidence,
+    phrased entirely in evidence-based language ("appeared in X of Y papers")
+    with no predictive claims. It's passed into llm.answer_question() the
+    same way a real lecture chunk is — every provider already reads
+    `content`/`snippet` generically, so this needs no LLMProvider changes.
+    Returns None when the course has no processed question papers, so
+    behavior for courses that never use this feature is unchanged."""
+    stats = [s for s in compute_topic_exam_stats(db, course_id) if s["total_papers_analyzed"] > 0]
+    if not stats:
+        return None
+    lines = []
+    for s in stats[:8]:
+        lines.append(
+            f"- {s['topic_name']}: appeared in {s['papers_appeared_in']} of "
+            f"{s['total_papers_analyzed']} analyzed question papers, across "
+            f"{s['years_appeared_in']} academic year(s); lecture coverage "
+            f"{s['lecture_coverage']:.2f}; recent trend: {s['recent_trend']}; "
+            f"historical priority: {s['priority_label']}."
+        )
+    content = (
+        "Historical question-paper evidence (factual counts from the "
+        "student's own uploaded past papers — describe this as historical "
+        "frequency, never as a guarantee about the next exam):\n" + "\n".join(lines)
+    )
+    return {
+        "lecture_id": None,
+        "lecture_title": "Historical Exam Pattern Analysis",
+        "lecture_number": None,
+        "content": content,
+        "snippet": content[:300],
+        "start_time": None,
+    }
 
 
 def _check_course_owner(db, course_id, user):
@@ -70,6 +120,11 @@ def ask_question(
             "start_time": r.get("metadata", {}).get("start_time") if isinstance(r.get("metadata"), dict) else None,
         })
 
+    if _is_exam_intent(req.question):
+        exam_chunk = _exam_evidence_chunk(db, req.course_id)
+        if exam_chunk:
+            context_chunks.insert(0, exam_chunk)
+
     t_llm = time.perf_counter()
     llm = get_llm_provider()
     answer_data = llm.answer_question(req.question, context_chunks)
@@ -87,6 +142,14 @@ def ask_question(
     seen_lectures = set()
     for c in citations_raw[:6]:
         lid = c.get("lecture_id")
+        # The Citation schema's lecture_id is a required int (it always points
+        # at a real Lecture for the frontend's "open full lecture" link) — the
+        # synthetic exam-evidence chunk above has lecture_id=None by design
+        # (it isn't a lecture), so a citation of it is surfaced in the answer
+        # text only, never as a Citation object. This also guards the
+        # pre-existing case of the LLM citing with a missing lecture_id.
+        if lid is None:
+            continue
         if lid in seen_lectures:
             continue
         seen_lectures.add(lid)

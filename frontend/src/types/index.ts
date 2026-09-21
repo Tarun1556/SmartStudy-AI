@@ -23,6 +23,7 @@ export interface CourseStats {
   lecture_count: number;
   topic_count: number;
   last_updated: string;
+  question_paper_count: number;
 }
 
 export interface ProcessingJob {
@@ -228,6 +229,93 @@ export interface QuizAttempt {
   total_questions: number;
   answers: Record<string, number> | null;
   completed_at: string;
+}
+
+export interface QuestionPaperProcessingJob {
+  id: number;
+  question_paper_id: number;
+  job_type: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  current_step: string | null;
+  progress: number;
+  error_message: string | null;
+  started_at: string | null;
+  completed_at: string | null;
+  created_at: string;
+}
+
+export interface QuestionPaper {
+  id: number;
+  course_id: number;
+  title: string;
+  academic_year: number | null;
+  semester: string | null;
+  exam_type: string | null;
+  original_filename: string;
+  file_size: number | null;
+  mime_type: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+  latest_job?: QuestionPaperProcessingJob | null;
+  question_count: number;
+}
+
+export interface QuestionPaperListResponse {
+  papers: QuestionPaper[];
+  papers_analyzed: number;
+  topics_identified: number;
+}
+
+export interface QuestionPaperQuestion {
+  id: number;
+  question_paper_id: number;
+  question_number: string | null;
+  section: string | null;
+  question_text: string;
+  marks: number | null;
+  unit: string | null;
+  topic_id: number | null;
+  topic_name: string | null;
+  topic_match_confidence: number | null;
+  normalized_topic: string | null;
+}
+
+export interface ExamTopicEvidence {
+  components: {
+    lecture_coverage: number;
+    frequency_score: number;
+    year_recurrence_score: number;
+    recent_trend_score: number;
+    marks_weight_score: number;
+  };
+  papers: Array<{ id: number; title: string; academic_year: number | null }>;
+}
+
+export interface ExamTopicInsight {
+  topic_id: number;
+  topic_name: string;
+  papers_appeared_in: number;
+  total_papers_analyzed: number;
+  years_appeared_in: number;
+  total_years_analyzed: number;
+  question_count: number;
+  total_marks: number | null;
+  avg_marks: number | null;
+  recent_trend: "increasing" | "decreasing" | "stable" | "insufficient_data";
+  lecture_coverage: number;
+  frequency_score: number;
+  priority_score: number;
+  priority_label: "high" | "medium" | "lower_historical_frequency";
+  evidence: ExamTopicEvidence;
+}
+
+export interface ExamInsightsResponse {
+  course_id: number;
+  papers_analyzed: number;
+  topics_identified: number;
+  has_historical_patterns: boolean;
+  topics: ExamTopicInsight[];
 }
 
 export interface DashboardStats {

@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, Upload, BookMarked, Sparkles, Search, MessageCircle, FileQuestion,
+  ArrowLeft, Upload, BookMarked, Sparkles, Search, MessageCircle, FileQuestion, TrendingUp,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -57,12 +57,25 @@ export default function CourseDetail() {
               <div className="mt-2 flex items-center gap-3 text-xs text-muted-foreground">
                 <Badge variant="outline" className="font-normal">{stats.lecture_count} lectures</Badge>
                 <Badge variant="outline" className="font-normal">{stats.topic_count} topics</Badge>
+                <Badge variant="outline" className="font-normal">{stats.question_paper_count} question papers</Badge>
                 <span>Updated {formatDate(stats.last_updated)}</span>
               </div>
             )}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
+          <Link to={`/courses/${courseId}/question-papers`}>
+            <Button variant="secondary">
+              <FileQuestion className="h-4 w-4" />
+              Question Papers
+            </Button>
+          </Link>
+          <Link to={`/courses/${courseId}/exam-insights`}>
+            <Button variant="secondary">
+              <TrendingUp className="h-4 w-4" />
+              Exam Insights
+            </Button>
+          </Link>
           <Link to={`/courses/${courseId}/study-guide`}>
             <Button variant="secondary">
               <BookMarked className="h-4 w-4" />

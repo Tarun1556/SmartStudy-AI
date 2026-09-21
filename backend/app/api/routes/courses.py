@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.api.deps import get_current_user
-from app.models import User, Course, Lecture, Topic, ProcessingJob, StudyGuide
+from app.models import User, Course, Lecture, Topic, ProcessingJob, StudyGuide, QuestionPaper
 from app.schemas import (
     CourseCreate, CourseUpdate, CourseRead, CourseStats,
     DashboardStats, TopicRead, ProcessingJobRead
@@ -123,6 +123,7 @@ def get_course_stats(
     _check_ownership(course, current_user)
     lecture_count = db.query(Lecture).filter(Lecture.course_id == course_id).count()
     topic_count = db.query(Topic).filter(Topic.course_id == course_id).count()
+    question_paper_count = db.query(QuestionPaper).filter(QuestionPaper.course_id == course_id).count()
     return CourseStats(
         id=course.id,
         name=course.name,
@@ -130,4 +131,5 @@ def get_course_stats(
         lecture_count=lecture_count,
         topic_count=topic_count,
         last_updated=course.updated_at,
+        question_paper_count=question_paper_count,
     )

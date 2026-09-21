@@ -27,6 +27,10 @@ class Settings(BaseSettings):
     SENTENCE_TRANSFORMERS_MODEL: str = "all-MiniLM-L6-v2"
 
     TOPIC_SIMILARITY_THRESHOLD: float = 0.85
+    # Matching a full question sentence against a short topic name/description
+    # scores lower than matching two topic labels against each other, so this
+    # is intentionally a separate, lower threshold from TOPIC_SIMILARITY_THRESHOLD.
+    EXAM_TOPIC_MATCH_THRESHOLD: float = 0.45
 
     MAX_UPLOAD_SIZE_MB: int = 100
 

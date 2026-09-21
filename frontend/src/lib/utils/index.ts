@@ -32,3 +32,22 @@ export function coverageLabel(score: number): string {
   if (score >= 0.4) return "Revisited Across Lectures";
   return "Introduced";
 }
+
+export function priorityBadge(label: string): string {
+  if (label === "high") return "bg-rose-500/10 text-rose-400 border-rose-500/30";
+  if (label === "medium") return "bg-amber-500/10 text-amber-400 border-amber-500/30";
+  return "bg-cyan-500/10 text-cyan-300 border-cyan-500/30";
+}
+
+export function priorityLabel(label: string): string {
+  if (label === "high") return "High Priority";
+  if (label === "medium") return "Medium Priority";
+  return "Lower Historical Frequency";
+}
+
+export function trendIcon(trend: string): string {
+  if (trend === "increasing") return "↑";
+  if (trend === "decreasing") return "↓";
+  if (trend === "stable") return "→";
+  return "·";
+}

@@ -64,6 +64,7 @@ class CourseStats(BaseModel):
     lecture_count: int
     topic_count: int
     last_updated: datetime
+    question_paper_count: int = 0
 
 
 class LectureAssetRead(BaseModel):
@@ -368,3 +369,110 @@ class CoverageEntry(BaseModel):
     mentions: int
     first_seen: bool
     depth: str
+
+
+class QuestionPaperProcessingJobRead(BaseModel):
+    id: int
+    question_paper_id: int
+    job_type: str
+    status: str
+    current_step: Optional[str] = None
+    progress: int
+    error_message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuestionPaperBase(BaseModel):
+    title: str = Field(..., min_length=1, max_length=500)
+    academic_year: Optional[int] = None
+    semester: Optional[str] = None
+    exam_type: Optional[str] = None
+
+
+class QuestionPaperRead(QuestionPaperBase):
+    id: int
+    course_id: int
+    original_filename: str
+    file_size: Optional[int] = None
+    mime_type: Optional[str] = None
+    status: str
+    created_at: datetime
+    updated_at: datetime
+    latest_job: Optional[QuestionPaperProcessingJobRead] = None
+    question_count: int = 0
+    model_config = ConfigDict(from_attributes=True)
+
+
+class QuestionPaperListResponse(BaseModel):
+    papers: List[QuestionPaperRead]
+    papers_analyzed: int
+    topics_identified: int
+
+
+class QuestionPaperUploadResponse(BaseModel):
+    question_paper_id: int
+    job_id: int
+    message: str
+
+
+class QuestionPaperQuestionRead(BaseModel):
+    id: int
+    question_paper_id: int
+    question_number: Optional[str] = None
+    section: Optional[str] = None
+    question_text: str
+    marks: Optional[int] = None
+    unit: Optional[str] = None
+    topic_id: Optional[int] = None
+    topic_name: Optional[str] = None
+    topic_match_confidence: Optional[float] = None
+    normalized_topic: Optional[str] = None
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ExamTopicPriorityComponents(BaseModel):
+    lecture_coverage: float
+    frequency_score: float
+    year_recurrence_score: float
+    recent_trend_score: float
+    marks_weight_score: float
+
+
+class ExamTopicPaperRef(BaseModel):
+    id: int
+    title: str
+    academic_year: Optional[int] = None
+
+
+class ExamTopicEvidence(BaseModel):
+    components: ExamTopicPriorityComponents
+    papers: List[ExamTopicPaperRef]
+
+
+class ExamTopicInsight(BaseModel):
+    topic_id: int
+    topic_name: str
+    papers_appeared_in: int
+    total_papers_analyzed: int
+    years_appeared_in: int
+    total_years_analyzed: int
+    question_count: int
+    total_marks: Optional[int] = None
+    avg_marks: Optional[float] = None
+    recent_trend: str
+    lecture_coverage: float
+    frequency_score: float
+    priority_score: float
+    priority_label: str
+    evidence: ExamTopicEvidence
+
+
+class ExamInsightsResponse(BaseModel):
+    course_id: int
+    papers_analyzed: int
+    topics_identified: int
+    has_historical_patterns: bool
+    topics: List[ExamTopicInsight]

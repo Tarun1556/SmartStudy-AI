@@ -43,6 +43,7 @@ class Course(Base):
     search_documents: Mapped[List["SearchDocument"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     quizzes: Mapped[List["Quiz"]] = relationship(back_populates="course", cascade="all, delete-orphan")
     chat_sessions: Mapped[List["ChatSession"]] = relationship(back_populates="course", cascade="all, delete-orphan")
+    question_papers: Mapped[List["QuestionPaper"]] = relationship(back_populates="course", cascade="all, delete-orphan")
 
 
 class Lecture(Base):
@@ -287,3 +288,75 @@ class ChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
 
     session: Mapped["ChatSession"] = relationship(back_populates="messages")
+
+
+class QuestionPaper(Base):
+    """A previous semester/year exam paper uploaded for historical analysis.
+
+    Deliberately mirrors Lecture's shape (status/timestamps/ownership-via-
+    course) rather than introducing a new convention. Processing is tracked
+    by a parallel QuestionPaperProcessingJob table instead of reusing
+    ProcessingJob, because ProcessingJob.lecture_id is NOT NULL and
+    create_all() cannot retrofit a schema change onto an existing table.
+    """
+    __tablename__ = "question_papers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    course_id: Mapped[int] = mapped_column(Integer, ForeignKey("courses.id", ondelete="CASCADE"), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(500), nullable=False)
+    academic_year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    semester: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    exam_type: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    original_filename: Mapped[str] = mapped_column(String(500), nullable=False)
+    file_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    file_size: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    mime_type: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    status: Mapped[str] = mapped_column(String(50), default="pending", nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    course: Mapped["Course"] = relationship(back_populates="question_papers")
+    questions: Mapped[List["QuestionPaperQuestion"]] = relationship(back_populates="question_paper", cascade="all, delete-orphan")
+    processing_jobs: Mapped[List["QuestionPaperProcessingJob"]] = relationship(back_populates="question_paper", cascade="all, delete-orphan")
+
+
+class QuestionPaperProcessingJob(Base):
+    __tablename__ = "question_paper_processing_jobs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    question_paper_id: Mapped[int] = mapped_column(Integer, ForeignKey("question_papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    job_type: Mapped[str] = mapped_column(String(100), default="question_paper_analysis", nullable=False)
+    status: Mapped[str] = mapped_column(String(50), default="queued", nullable=False)
+    current_step: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False)
+
+    question_paper: Mapped["QuestionPaper"] = relationship(back_populates="processing_jobs")
+
+
+class QuestionPaperQuestion(Base):
+    __tablename__ = "question_paper_questions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    question_paper_id: Mapped[int] = mapped_column(Integer, ForeignKey("question_papers.id", ondelete="CASCADE"), nullable=False, index=True)
+    question_number: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    section: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    question_text: Mapped[str] = mapped_column(Text, nullable=False)
+    marks: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    unit: Mapped[Optional[str]] = mapped_column(String(200), nullable=True)
+    topic_id: Mapped[Optional[int]] = mapped_column(Integer, ForeignKey("topics.id", ondelete="SET NULL"), nullable=True, index=True)
+    topic_match_confidence: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    normalized_topic: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    embedding: Mapped[Optional[List[float]]] = mapped_column(Vector(384), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, nullable=False)
+
+    question_paper: Mapped["QuestionPaper"] = relationship(back_populates="questions")
+    topic: Mapped[Optional["Topic"]] = relationship()
+
+    __table_args__ = (
+        Index("ix_question_paper_questions_paper_topic", "question_paper_id", "topic_id"),
+    )

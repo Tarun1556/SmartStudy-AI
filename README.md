@@ -25,6 +25,7 @@ On top of that knowledge base, SmartStudy-AI generates:
 - **Auto-compiled study guides** — a ranked, semester-long summary built from topic coverage, not a single document.
 - **Practice quizzes** — MCQs generated from your material, each traceable to its source lecture/topic.
 - **Knowledge maps & topic timelines** — a visual graph of how concepts relate and evolve lecture-to-lecture.
+- **Exam-focused prep** — upload previous semester question papers and SmartStudy-AI combines their historical patterns with your lecture coverage into an explainable topic-priority ranking (see [Question paper analysis](#question-paper-analysis-exam-prep) below).
 
 ---
 
@@ -33,6 +34,7 @@ On top of that knowledge base, SmartStudy-AI generates:
 - [Architecture](#architecture)
 - [Data model](#data-model)
 - [How a lecture becomes a knowledge graph (workflow)](#how-a-lecture-becomes-a-knowledge-graph-workflow)
+- [Question paper analysis (exam prep)](#question-paper-analysis-exam-prep)
 - [Tech stack](#tech-stack)
 - [Project structure](#project-structure)
 - [Getting started](#getting-started)
@@ -299,6 +301,40 @@ A **PostgreSQL advisory lock** (`pg_advisory_xact_lock` on `course_id`) guards t
 
 ---
 
+## Question paper analysis (exam prep)
+
+Each course also has a **Question Papers** section: upload previous semester/year exam papers (PDF) and SmartStudy-AI extracts individual questions, maps them to the same `Topic` rows your lectures already built, and turns that into an **evidence-based** exam-priority ranking — never a prediction. Full design rationale in [`QUESTION_PAPER_FEATURE_PLAN.md`](./QUESTION_PAPER_FEATURE_PLAN.md).
+
+```
+Upload PDF → QuestionPaper (pending) → background job:
+  extract text (PyMuPDF, reused from the lecture pipeline)
+    → segment into questions (new question-boundary-aware regex splitter —
+      section headers, "1.", "Q3", "1(a)", "[10 marks]" — falls back to one
+      preserved block for unrecognized formats, never drops the original text)
+    → LLM cleans/normalizes each block (Mock/OpenAI/Anthropic/Gemini, same
+      LLMProvider pattern as the rest of the app)
+    → batch-embed all questions
+    → match each question to an existing course Topic by cosine similarity
+      (read-only — never mints new topics from exam content; low-confidence
+      matches are left unmapped rather than forced)
+    → index into the same SearchDocument table lectures use (doc_type="question"),
+      so /api/search and /api/ask pick it up automatically
+    → QuestionPaper.status = processed
+```
+
+**Priority score** — a documented, explainable weighted sum (all components 0–1, weights sum to 1.0):
+
+```
+priority_score = 0.30·lecture_coverage + 0.30·frequency_score + 0.15·year_recurrence_score
+                + 0.10·recent_trend_score + 0.15·marks_weight_score
+```
+
+`frequency_score` = papers containing the topic ÷ papers analyzed. `year_recurrence_score` = distinct academic years the topic appeared in ÷ years analyzed. `recent_trend_score` compares the topic's paper-share in the newer half of analyzed years vs. the older half. Every component and its raw counts (which papers, which years) are returned by `GET /courses/{id}/exam-insights` so the UI's "why is this prioritized" bullets are read straight from stored numbers — see `app/services/question_papers/analysis.py`.
+
+The Study Guide (`generate_study_guide`) and RAG `Ask` (`POST /api/ask`) both consume this the same way: the study guide stamps a DB-authoritative `exam_priority` block onto each topic (same "LLM is trusted for prose, never for arithmetic" principle already used for lecture coverage), and exam-intent questions to `/ask` get a synthetic, evidence-phrased context chunk injected alongside the normal retrieved lecture chunks. For a course with zero uploaded question papers, both behave exactly as they did before this feature existed.
+
+---
+
 ## Tech stack
 
 | Layer | Choices |
@@ -336,12 +372,14 @@ SmartStudy-AI/
 │   │   │   ├── embeddings/         # EmbeddingProvider: sentence-transformers/Mock
 │   │   │   ├── topics/             # topic merge, coverage scoring, knowledge map
 │   │   │   ├── search/             # semantic search indexing/query
-│   │   │   └── study_guide/        # cross-course study guide compilation
+│   │   │   ├── study_guide/        # cross-course study guide compilation
+│   │   │   └── question_papers/    # exam paper segmentation, topic matching, priority scoring
 │   │   └── tasks/                  # background job runner, demo data seeding
-│   └── tests/                      # pytest suite (auth, courses, lectures, search, ...)
+│   └── tests/                      # pytest suite (auth, courses, lectures, search, question_papers, ...)
 ├── frontend/
 │   └── src/
-│       ├── pages/                  # Dashboard, Courses, Upload, Ask, Search, Quiz, ...
+│       ├── pages/                  # Dashboard, Courses, Upload, Ask, Search, Quiz,
+│       │                           #   QuestionPapers, ExamInsights, ...
 │       ├── components/
 │       │   ├── charts/             # KnowledgeMapView, TopicTimelineView
 │       │   ├── ui/                 # Radix-based design system primitives
@@ -424,6 +462,7 @@ All routes are prefixed `/api` and (except `/auth/*`, `/demo/*`, `/health`) requ
 | **Ask** | `POST /ask` — grounded Q&A with citations, `GET /ask/sessions/{course_id}`, `GET /ask/session/{id}` |
 | **Quiz** | `POST /quiz/generate`, `GET /quiz/{id}`, `POST /quiz/{id}/attempts`, `GET /quiz/{id}/attempts`, `GET /quiz/list/{course_id}` |
 | **Study Guide** | `GET /courses/{id}/study-guide`, `POST /courses/{id}/study-guide/regenerate`, `GET /courses/{id}/study-guide/pdf` |
+| **Question Papers** | `GET/POST /courses/{id}/question-papers`(`/upload`), `GET /question-papers/{id}`(`/status`,`/questions`,`/download`), `POST /question-papers/{id}/retry`, `DELETE /question-papers/{id}`, `GET /courses/{id}/exam-insights` |
 | **Dashboard** | `GET /dashboard` — aggregated stats for the signed-in user |
 | **Demo** | `GET /demo/token`, `GET /demo/course` — instant guest access to seeded content |
 
@@ -436,7 +475,7 @@ cd backend
 pytest --cov=app
 ```
 
-Covers auth, courses, lectures (upload → processing → notes), topics, search, a full end-to-end flow (`test_e2e.py`), retrieval building blocks (`test_embeddings_and_chunking.py`: cosine similarity edge cases, deterministic embeddings, chunking), and background-job reliability (`test_job_reliability.py`: stale-job sweep, retry endpoint, ownership/state checks). Tests run against SQLite by default (the `pgvector.Vector` column type is swapped for `JSON` at collection time in `conftest.py`), so no Postgres instance is required to run the suite — `search_hybrid`'s Postgres-only ANN branch is skipped in favor of its in-process fallback, and both paths are exercised by the same tests. Set `TEST_DATABASE_URL` to run against a real Postgres/pgvector instance instead.
+Covers auth, courses, lectures (upload → processing → notes), topics, search, a full end-to-end flow (`test_e2e.py`), retrieval building blocks (`test_embeddings_and_chunking.py`: cosine similarity edge cases, deterministic embeddings, chunking), background-job reliability (`test_job_reliability.py`: stale-job sweep, retry endpoint, ownership/state checks), and question paper analysis (`test_question_papers.py`: upload/ownership/download, PDF preservation, extraction across formats, topic mapping, frequency/year-recurrence/trend calculation, priority scoring, study-guide and RAG/search integration, failed-processing and retry). Tests run against SQLite by default (the `pgvector.Vector` column type is swapped for `JSON` at collection time in `conftest.py`), so no Postgres instance is required to run the suite — `search_hybrid`'s Postgres-only ANN branch is skipped in favor of its in-process fallback, and both paths are exercised by the same tests. Set `TEST_DATABASE_URL` to run against a real Postgres/pgvector instance instead.
 
 ---
 

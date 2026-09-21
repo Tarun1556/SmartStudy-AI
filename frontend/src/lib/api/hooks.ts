@@ -4,6 +4,8 @@ import type {
   Course, CourseStats, DashboardStats, Lecture, LectureNote,
   Topic, TopicDetail, TopicTimeline, TopicMention, StudyGuide,
   SearchResponse, AskResponse, Quiz, QuizAttempt, ProcessingJob, KnowledgeMap,
+  QuestionPaper, QuestionPaperListResponse, QuestionPaperProcessingJob,
+  QuestionPaperQuestion, ExamInsightsResponse,
 } from "@/types";
 
 export const useCourses = () =>
@@ -304,5 +306,106 @@ export const useDashboard = () =>
     queryFn: async () => {
       const res = await api.get("/api/dashboard");
       return res.data as DashboardStats;
+    },
+  });
+
+// ---------------------------------------------------------------------------
+// Question papers
+// ---------------------------------------------------------------------------
+
+export const useQuestionPapers = (courseId: number | null | undefined) =>
+  useQuery({
+    queryKey: ["question-papers", courseId],
+    enabled: !!courseId,
+    queryFn: async () => {
+      const res = await api.get(`/api/courses/${courseId}/question-papers`);
+      return res.data as QuestionPaperListResponse;
+    },
+  });
+
+export const useQuestionPaper = (id: number | null | undefined) =>
+  useQuery({
+    queryKey: ["question-paper", id],
+    enabled: !!id,
+    queryFn: async () => {
+      const res = await api.get(`/api/question-papers/${id}`);
+      return res.data as QuestionPaper;
+    },
+  });
+
+export const useUploadQuestionPaper = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ courseId, form }: { courseId: number; form: FormData }) =>
+      api
+        .post(`/api/courses/${courseId}/question-papers/upload`, form, {
+          headers: { "Content-Type": "multipart/form-data" },
+        })
+        .then((r) => r.data as { question_paper_id: number; job_id: number; message: string }),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["question-papers", vars.courseId] });
+      qc.invalidateQueries({ queryKey: ["course-stats", vars.courseId] });
+    },
+  });
+};
+
+export const useQuestionPaperStatus = (id: number | null | undefined, refetchInterval = 1500) =>
+  useQuery({
+    queryKey: ["question-paper-status", id],
+    enabled: !!id,
+    refetchInterval: (query) => {
+      const data = query.state.data as QuestionPaperProcessingJob | undefined;
+      if (!data) return refetchInterval;
+      if (data.status === "completed" || data.status === "failed") return false;
+      return refetchInterval;
+    },
+    queryFn: async () => {
+      const res = await api.get(`/api/question-papers/${id}/status`);
+      return res.data as QuestionPaperProcessingJob;
+    },
+  });
+
+export const useRetryQuestionPaperProcessing = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (paperId: number) =>
+      api.post(`/api/question-papers/${paperId}/retry`).then((r) => r.data as QuestionPaperProcessingJob),
+    onSuccess: (_data, paperId) => {
+      qc.invalidateQueries({ queryKey: ["question-paper-status", paperId] });
+      qc.invalidateQueries({ queryKey: ["question-paper", paperId] });
+    },
+  });
+};
+
+export const useDeleteQuestionPaper = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ paperId }: { paperId: number; courseId: number }) =>
+      api.delete(`/api/question-papers/${paperId}`),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["question-papers", vars.courseId] });
+      qc.invalidateQueries({ queryKey: ["course-stats", vars.courseId] });
+      qc.invalidateQueries({ queryKey: ["exam-insights", vars.courseId] });
+    },
+  });
+};
+
+export const useQuestionPaperQuestions = (paperId: number | null | undefined) =>
+  useQuery({
+    queryKey: ["question-paper-questions", paperId],
+    enabled: !!paperId,
+    queryFn: async () => {
+      const res = await api.get(`/api/question-papers/${paperId}/questions`);
+      return res.data as QuestionPaperQuestion[];
+    },
+  });
+
+export const useExamInsights = (courseId: number | null | undefined) =>
+  useQuery({
+    queryKey: ["exam-insights", courseId],
+    enabled: !!courseId,
+    queryFn: async () => {
+      const res = await api.get(`/api/courses/${courseId}/exam-insights`);
+      return res.data as ExamInsightsResponse;
     },
   });

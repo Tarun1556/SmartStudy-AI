@@ -53,6 +53,8 @@ def _ensure_vector_indexes():
         "ON search_documents USING hnsw (embedding vector_cosine_ops)",
         "CREATE INDEX IF NOT EXISTS ix_topics_embedding_hnsw "
         "ON topics USING hnsw (embedding vector_cosine_ops)",
+        "CREATE INDEX IF NOT EXISTS ix_question_paper_questions_embedding_hnsw "
+        "ON question_paper_questions USING hnsw (embedding vector_cosine_ops)",
     ]
     for stmt in statements:
         try:

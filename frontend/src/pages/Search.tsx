@@ -207,6 +207,7 @@ function TypeBadge({ type }: { type: string }) {
     note: { cls: "bg-emerald-500/10 text-emerald-400 border-emerald-500/30", label: "Notes" },
     segment: { cls: "bg-sky-500/10 text-sky-400 border-sky-500/30", label: "Transcript" },
     chunk: { cls: "bg-muted text-muted-foreground border-border", label: "Snippet" },
+    question: { cls: "bg-amber-500/10 text-amber-400 border-amber-500/30", label: "Question Paper" },
   };
   const s = map[type.toLowerCase()] || {
     cls: "bg-muted text-muted-foreground border-border",
